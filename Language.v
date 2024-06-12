@@ -17,6 +17,7 @@ Inductive type : Type :=
   | String.
   (* | Fun (args : list type) (return_type : type). *)
 
+(* Type Equality *)
 Definition eqb (tau1 tau2 : type) : bool :=
   match (tau1, tau2) with
     | (Bool, Bool) | (Int, Int) | (String, String) => true
@@ -31,6 +32,7 @@ Inductive value : Type :=
   | IntValue (i : nat)
   | StringValue (s : string).
 
+(* Type of each value *)
 Definition value_to_type (v : value) : type :=
   match v with
   | UnitValue => Unit
@@ -88,71 +90,102 @@ Notation "x ; y" :=
 Open Scope com_scope.
 
 (* Test Syntax Notation *) (* Unset Printing Notations *)
-Lemma test1 : forall (e1 e2 : expression), <{ e1 ; e2 }> = Sequence e1 e2.
+Example test1 : forall (e1 e2 : expression), <{ e1 ; e2 }> = Sequence e1 e2.
 Proof. reflexivity. Qed.
-Lemma test2 : forall (e : expression) (x : variable), <{ x = e }> = Assign x e.
+Example test2 : forall (e : expression) (x : variable), <{ x = e }> = Assign x e.
 Proof. reflexivity. Qed.
-Lemma test3 : forall (e : expression) (x : variable),
+Example test3 : forall (e : expression) (x : variable),
   <{ x = e ; Var x }> = Sequence (Assign x e) (Var x).
 Proof. reflexivity. Qed.
-Lemma test4 : forall (e : expression) (x : variable),
+Example test4 : forall (e : expression) (x : variable),
   <{ let x = e ;  x = e }> = Let x e (Assign x e).
 Proof. reflexivity. Qed.
-Lemma test5 : forall (e : expression) (x : variable),
+Example test5 : forall (e : expression) (x : variable),
   <{ x = e ; let x = e ; () }> 
     = Sequence (Assign x e) (Let x e (Value UnitValue)).
 Proof. reflexivity. Qed.
-Lemma test6 : forall (e : expression) (x : variable), 
+Example test6 : forall (e : expression) (x : variable), 
   <{ x = e }> = Assign x e.
 Proof. reflexivity. Qed.
-Lemma test7 : forall (e1 e2 : expression) (x y : variable), 
+Example test7 : forall (e1 e2 : expression) (x y : variable), 
   <{ let x = e1 ; let y = e2 ; () }> 
   = Let x e1 (Let y e2 (Value UnitValue)).
 Proof. reflexivity. Qed.
-Lemma test8 : forall (x : variable) (e : expression),
+Example test8 : forall (x : variable) (e : expression),
   <{ let x = 4 ; e }> = Let x 4 e.
 Proof. reflexivity. Qed.
-Lemma test9 : forall (e1 e2 e3 : expression),
+Example test9 : forall (e1 e2 e3 : expression),
   <{ e1; e2; e3 }> = Sequence e1 (Sequence e2 e3).
 Proof. reflexivity. Qed.
-Lemma test10 : forall (x y z : variable),
+Example test10 : forall (x y z : variable),
   <{let x = 2; let y = 3; let z = 4; ()}> = Let x 2 (Let y 3 (Let z 4 <{()}>)).
 Proof. reflexivity. Qed.
-Lemma test11 : forall (x y : variable) (e : expression),
+Example test11 : forall (x y : variable) (e : expression),
   <{ x = 8; x ; let y = 4 ; x }> 
     = Sequence (Assign x 8) (Sequence x (Let y 4 x)).
 Proof. reflexivity. Qed.
-Lemma test12 : forall (x : variable) (e : expression),
+Example test12 : forall (x : variable) (e : expression),
   <{ let x = 4; x = 8; e }> = Let x 4 (Sequence (Assign x 8) e).
 Proof. reflexivity. Qed.
+Example test13 : forall (x : variable) (e : expression) (f : function),
+  <{ f [3] }> = FunctionCall f [3].
 
-(* Typing Relation Definition *)
+(* Refinement for types *)
 Inductive refinement : Type := 
   | None
   | NotAccessible.
-Definition refined_type : Type := refinement * type.
-Definition typingEnv : Type := list (variable * refined_type).
-(* Reserved Notation "Gamma '|-' x ':' tau" (at level 100). *)
 
-Inductive type_expression : typingEnv -> variable -> type -> Prop :=
-  | Env_Empty (x : variable) (tau : type) :
-      type_expression [(x, (None, tau))] x tau
+(* Complete types with refinement *)
+Definition refined_type : Type := refinement * type.
+
+(* Typing Environment *)
+Definition typingEnv : Type := list (variable * refined_type).
+
+(* Memory Model Definition *)
+Definition memory : Type := list variable.
+Definition symbol_table : Type := list (variable * nat).
+Definition execution_stack : Type := list (symbol_table * expression).
+Definition execution_state : Type := (memory * execution_stack).
+
+(*********************************
+   Relation Operational Semantics
+**********************************)
+Inductive semantics_expression : execution_state -> execution_state -> Prop :=
+  | VarSem (ex1 ex2 : execution_state) : semantics_expression ex1 ex2
+.
+
+(* Example test50 : forall (x : variable) (tau : type), *)
+  (* (type_expression [(x, (None, tau))] x tau). *)
+(* Proof. apply Env_Empty. Qed. *)
+
+(****************************
+   Relation Typing Expression
+****************************)
+
+Reserved Notation " gamma '|-' e ':' tau '=>' gamma'" 
+    (at level 90,
+    e at level 0,
+    tau at level 0).
+Inductive type_expression : typingEnv -> expression -> type -> typingEnv -> Prop :=
+  | VarType (x : variable) (tau : type) :
+    [(x, (None, tau))] |- x : tau => [(x, (None, tau))]
   | Env_Rec (gamma : typingEnv) (x y : variable) (taux tauy : type) :
       x <> y
-      -> type_expression ((y, (None, tauy))::gamma) x taux
-      -> type_expression gamma x taux.
-(* where "gamma '|-' x ':' tau" := (typing gamma x tau) : type_scope. *)
+      -> ((y, (None, tauy))::gamma) |- x : taux => ((y, (None, tauy))::gamma)
+      -> gamma |- x : taux => gamma
+where " gamma '|-' x ':' tau '=>' gamma'" := (type_expression gamma x tau gamma').
+Example test100 : forall (x : variable) (tau : type),
+  [(x, (None, tau))] |- x : tau => [(x, (None, tau))].
+Proof. apply VarType. Qed.
 
-Lemma test50 : forall (x : variable) (tau : type),
-  (type_expression [(x, (None, tau))] x tau).
-Proof. apply Env_Empty. Qed.
-
+(* Result Type for Function that can fail *)
 Inductive result (A E: Type) : Type :=
 | Ok (x : A)
 | Error (error : E).
-
 Arguments Ok [A E].
 Arguments Error [A E].
+
+(* return monad TODO *)
 
 Inductive customError : Type :=
   | ExecutionError
@@ -161,9 +194,10 @@ Inductive customError : Type :=
   | VariableNotTypable
   | TypeError (expected given : type).
 
-
-(* Function Typing Variable *)
-Fixpoint typing_var_exec
+(***************************
+  Function Typing Variable
+***************************)
+Fixpoint type_var_exec
   (gamma : typingEnv) (x : variable) : (result (type * typingEnv) customError) :=
     match gamma with
     | [] => Error VariableNotTypable
@@ -174,22 +208,24 @@ Fixpoint typing_var_exec
           | Unit | Bool | Int => Ok (tau, gamma)
           | String => Ok (tau, (y, (NotAccessible, tau))::gamma')
           end
-        else (typing_var_exec gamma' x)
+        else (type_var_exec gamma' x)
   end.
 
-Lemma test100 : forall (x : variable),
-  typing_var_exec [] x = Error VariableNotTypable.
+Example test150 : forall (x : variable),
+  type_var_exec [] x = Error VariableNotTypable.
 Proof. reflexivity. Qed.
-Lemma test101 : forall (x y : variable),
+Example test151 : forall (x y : variable),
   String.eqb x y = true ->
-  typing_var_exec [(y, (None, Int))] x = Ok (Int, [(y, (None, Int))]).
+  type_var_exec [(y, (None, Int))] x = Ok (Int, [(y, (None, Int))]).
 Proof. intros. simpl. rewrite H. reflexivity. Qed.
-Lemma test102 : forall (x : variable),
-  typing_var_exec [] x = Error VariableNotTypable.
+Example test152 : forall (x : variable),
+  type_var_exec [] x = Error VariableNotTypable.
 Proof. reflexivity. Qed.
 
-(* Function Typing Expression *)
-Fixpoint typing_expression_exec
+(*****************************
+  Function Typing Expression
+*****************************)
+Fixpoint type_expression_exec
   (n : nat) (gamma : typingEnv) (e : expression)
   : (result (type * typingEnv) customError) :=
   match n with
@@ -197,10 +233,10 @@ Fixpoint typing_expression_exec
   | S i =>
   match e with
   | <{ e1 ; e2 }> =>
-      match typing_expression_exec i gamma e1 with
+      match type_expression_exec i gamma e1 with
       | Error err => Error err
       | Ok (tau1, gamma1) =>
-          match typing_expression_exec i gamma1 e2 with
+          match type_expression_exec i gamma1 e2 with
           | Error err => Error err
           | Ok (tau2, gamma2) =>
               if (tau1 =? Unit)
@@ -209,19 +245,19 @@ Fixpoint typing_expression_exec
           end
       end
   | <{ let x = e1 ; e2 }> =>
-      match typing_expression_exec i gamma e1 with
+      match type_expression_exec i gamma e1 with
       | Ok (tau1, gamma1) =>
-          typing_expression_exec i ((x, (None, tau1))::gamma1) e2
+          type_expression_exec i ((x, (None, tau1))::gamma1) e2
       | err => err
       end
   | Var x =>
-    match typing_var_exec gamma x with
+    match type_var_exec gamma x with
     | Error err => Error err
     | Ok (tau, gamma') => Ok (tau, gamma') (* TODO get different gamma borrow checking *)
     end
   | Value v => Ok (value_to_type v, gamma)
   | <{ x = e }> =>
-    match typing_expression_exec i gamma e with
+    match type_expression_exec i gamma e with
     | Error err => Error err
     | Ok (tau, gamma') => Error Todo
     end
@@ -233,28 +269,37 @@ Fixpoint typing_expression_exec
 Definition BigNat := 10000.
 (* Check BigNat. *)
 
-Lemma test150 : forall (x : variable),
-  typing_expression_exec BigNat [] <{ 4128 }> = Ok (Int, []).
+Example test200 : forall (x : variable),
+  type_expression_exec BigNat [] <{ 4128 }> = Ok (Int, []).
 Proof. intros. simpl. reflexivity. Qed.
-Lemma test151 : forall (x : variable),
-  typing_expression_exec BigNat [] <{ let x = 4128 ; Var x }>
+Example test201 : forall (x : variable),
+  type_expression_exec BigNat [] <{ let x = 4128 ; Var x }>
     = Ok (Int, [(x, (None, Int))]).
 Proof. intros. simpl. rewrite String.eqb_refl. reflexivity. Qed.
-Lemma test152 : forall (x : variable) (s : string),
-  typing_expression_exec BigNat [] <{ let x = s ; Var x }> 
+Example test202 : forall (x : variable) (s : string),
+  type_expression_exec BigNat [] <{ let x = s ; Var x }> 
     = Ok (String, [(x, (NotAccessible, String))]).
 Proof. intros. simpl. rewrite String.eqb_refl. reflexivity. Qed.
 
-Fixpoint semantics_exec 
-  (n : nat) (e : expression) : result value customError :=
+(**********************
+  Function Semantics
+**********************)
+Fixpoint semantics_expression_exec 
+  (n : nat) (ex : execution_state) : result execution_state customError :=
   match n with
   | 0 => Error NonTerminatingFunction
-  | S i => 
-  match e with
-  | _ => Error Todo
+  | S i =>
+  let (sigma, ex_stack) := ex in 
+  match ex_stack with
+  | [] => Error Todo
+  | (env_stack, e)::ex_stack' => 
+    match e with
+    |
+      semantics_expression_exec i (sigma, ex_stack')
   end
-  end
-.
+  end.
 
+Example test250 : forall (x : variable),
+  semantics_expression_exec BigNat [].
 
 End Lang1.
