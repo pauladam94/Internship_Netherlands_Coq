@@ -3,7 +3,7 @@ Prooving Some Borrow checking Propertie in Coq
 
 ## How to run
 
-```bash
+```rust
     coq_makefile -f _CoqProject *.v -o Makefile
     make
 ```
