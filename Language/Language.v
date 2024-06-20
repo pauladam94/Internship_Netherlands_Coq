@@ -1,47 +1,50 @@
+From Coq Require Import Strings.String.
+
 (* Type Definition *)
-Definition variable : Type := nat.
-Definition function : Type := nat.
+(* Definition variable : Type := nat. *)
+Definition variable : Type := string.
+Definition function : Type := string.
 Inductive type : Type :=
-  | Unit
-  | Bool
-  | Int
-  | String.
+  | UnitT
+  | BoolT
+  | IntT
+  | StringT.
   (* | Fun (args : list type) (return_type : type). *)
 
 (* Type Equality *)
 Definition type_eqb (tau1 tau2 : type) : bool :=
   match (tau1, tau2) with
-    | (Bool, Bool) | (Int, Int) | (String, String) => true
+    | (BoolT, BoolT) | (IntT, IntT) | (StringT, StringT) => true
     | _ => false
   end.
 
 (* Value Definition *)
 Inductive value : Type :=
-  | UnitValue
-  | BoolValue (b : bool)
-  | IntValue (i : nat)
-  | StringValue (s : nat).
+  | UnitV
+  | BoolV (b : bool)
+  | IntV (i : nat)
+  | StringV (s : nat).
 
 (* Type of each value *)
 Definition value_to_type (v : value) : type :=
   match v with
-  | UnitValue => Unit
-  | BoolValue _ => Bool
-  | IntValue _ => Int
-  | StringValue _ => String
+  | UnitV => UnitT
+  | BoolV _ => BoolT
+  | IntV _ => IntT
+  | StringV _ => StringT
   end.
 
 (* Syntax Definition *)
 Inductive expression : Type :=
-  | Sequence (e1 e2 : expression)
   | Let (x : variable) (e1 e2 : expression)
   | FunctionCall (f : function) (args : list expression)
-  | Var (x : variable)
   | Assign (x : variable) (e : expression)
-  | Value (v : value).
+  | Var (x : variable)
+  | Value (v : value)
+  | Sequence (e1 e2 : expression).
 
 (* Refinement for types *)
-Inductive refinement : Type := 
+Inductive refinement : Type :=
   | None
   | NotAccessible.
 
@@ -52,6 +55,9 @@ Definition refined_type : Type := refinement * type.
 Definition typingEnv : Type := list (variable * refined_type).
 
 (* Memory Model Definition *)
+Inductive semaphore : Type :=
+  | Writing
+  | Reading (n : nat).
 Definition memory : Type := list variable.
 Definition symbol_table : Type := list (variable * nat).
 Definition execution_stack : Type := list (symbol_table * expression).
