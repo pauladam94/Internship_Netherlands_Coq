@@ -7,22 +7,8 @@ Inductive result (X: Type) : Type :=
   (* | Ok (x : X) *)
   | Error (s : string).
 
-(* Inductive res (A: Type) : Type := *)
-(* | OK: A -> res A *)
-(* | Error: errmsg -> res A. *)
 Arguments Ok [X].
 Arguments Error [X].
-
-(* Check Ok. *)
-
-(* Inductive result (A E: Type) : Type := *)
-(* | Ok (x : A) *)
-(* | Error (error : E). *)
-(**)
-(* Arguments Ok [A E]. *)
-(* Arguments Error [A E]. *)
-
-(* return monad TODO *)
 
 Inductive customError : Type :=
   | ExecutionError
@@ -31,12 +17,23 @@ Inductive customError : Type :=
   | VariableNotTypable
   | TypeError (expected given : type).
 
-(* Notation "let+ x = y ; e " := ( *)
-(*   match y with *)
-(*     | Ok a => let x := a in e *)
-(*     | Error err => Error err *)
-(*   end *)
-(*   ) (no associativity, only parsing, at level 50). *)
+(* Notations for Error *)
+Notation "'let+' p = e1 ; e2"
+   := (match e1 with
+       | Ok p => e2
+       | Error err => Error err
+       end)
+   (right associativity, p pattern, at level 60, e1 at next level).
+
+Notation "'try' e1 'or' e2"
+   := (
+    let result := e1 in
+    match result with
+       | Ok _  => result
+       | Error _ => e2
+       end)
+   (right associativity,
+    at level 60, e1 at next level, e2 at next level).
 
 Module Test.
 End Test.

@@ -11,6 +11,13 @@ Inductive type : Type :=
   | StringT.
   (* | Fun (args : list type) (return_type : type). *)
 
+Definition type_to_string (t : type) : string :=
+  match t with
+  | UnitT => "Unit"
+  | BoolT => "Bool"
+  | IntT => "Int"
+  | StringT => "String"
+  end.
 (* Type Equality *)
 Definition type_eqb (tau1 tau2 : type) : bool :=
   match (tau1, tau2) with

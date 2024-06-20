@@ -108,23 +108,6 @@ Compute tokenize "let x = 4;".
 
 End TestTokenize.
 
-Notation "'let+' p = e1 ; e2"
-   := (match e1 with
-       | Ok p => e2
-       | Error err => Error err
-       end)
-   (right associativity, p pattern, at level 60, e1 at next level).
-
-Notation "'try' e1 'or' e2"
-   := (
-    let result := e1 in
-    match result with
-       | Ok _  => result
-       | Error _ => e2
-       end)
-   (right associativity,
-    at level 60, e1 at next level, e2 at next level).
-
 (* TODO put this in Error.v *)
 
 (* Definition parser (T : Type) := *)
