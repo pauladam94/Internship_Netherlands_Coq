@@ -18,6 +18,7 @@ Definition type_to_string (t : type) : string :=
   | IntT => "Int"
   | StringT => "String"
   end.
+
 (* Type Equality *)
 Definition type_eqb (tau1 tau2 : type) : bool :=
   match (tau1, tau2) with

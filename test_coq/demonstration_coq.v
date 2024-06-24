@@ -1,3 +1,11 @@
+
+
+
+
+
+
+
+
 Inductive expression : Type :=
   | Nat     (i : nat)
   | Sum     (e1 e2 : expression).
@@ -5,7 +13,7 @@ Inductive expression : Type :=
 (* Some Notations *)
 Coercion Nat : nat >-> expression.
 Notation "e1 '+++' e2" := (Sum e1 e2) (at level 0).
-(* Some Notations *)
+
 
 Fixpoint compute (e : expression) : nat :=
   match e with
@@ -47,3 +55,9 @@ Proof. intros. induction e as [|e1 IHe1 e2 IHe2].
     rewrite IHe1.
     rewrite IHe2. reflexivity.
 Qed.
+
+
+
+
+
+

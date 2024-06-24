@@ -20,15 +20,14 @@ Module SemanticsRelationTest.
 (* Proof. apply Env_Empty. Qed. *)
 End SemanticsRelationTest.
 
-
 (********************************
   Function Operational Semantics
 *********************************)
 Fixpoint semantics_expression_exec 
-  (n : nat) (ex : execution_state) : result execution_state :=
-  match n with
+  (step : nat) (ex : execution_state) : result execution_state :=
+  match step with
   | 0 => Error "NonTerminatingFunction"
-  | S i =>
+  | S n =>
   let (sigma, ex_stack) := ex in
   match ex_stack with
   | [] => Error "Todo"
