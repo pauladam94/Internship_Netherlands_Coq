@@ -94,10 +94,6 @@ Fixpoint type_expression_exec
   end
   end.
 
-(* BigInt use for making sure function terminates *)
-Definition BigNat := 1000.
-(* Check BigNat. *)
-
 Example example200 : forall (x : variable),
   type_expression_exec BigNat [] (Value (IntV 4128)) = Ok (IntT, []).
   (* 4128 : int *)

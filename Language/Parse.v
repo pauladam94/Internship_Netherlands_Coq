@@ -4,6 +4,7 @@ From Coq Require Import Init.Nat.
 From Coq Require Import Lists.List. Import ListNotations.
 From Language Require Import Error.
 From Language Require Import Language.
+From Language Require Import Utils.
 
 Definition isWhite (c : ascii) : bool :=
   let n := nat_of_ascii c in
@@ -37,15 +38,6 @@ Definition classifyChar (c : ascii) : chartype :=
   else
     other.
 
-Fixpoint list_of_string (s : string) : list ascii :=
-  match s with
-  | EmptyString => []
-  | String c s => c :: (list_of_string s)
-  end.
-
-Definition string_of_list (xs : list ascii) : string :=
-  fold_right String EmptyString xs.
-
 Definition token := string.
 
 (* More precise tokenizer *)
@@ -63,6 +55,12 @@ Fixpoint tokenize_helper (cls : chartype) (acc xs : list ascii)
   | [] => tk
   | (x::xs') =>
     match cls, classifyChar x, x with
+    | _, _, ";"      =>
+      tk ++ [";"]::(tokenize_helper other [] xs')
+    | _, _, "{"      =>
+      tk ++ ["{"]::(tokenize_helper other [] xs')
+    | _, _, "}"      =>
+      tk ++ ["}"]::(tokenize_helper other [] xs')
     | _, _, "("      =>
       tk ++ ["("]::(tokenize_helper other [] xs')
     | _, _, ")"      =>
@@ -87,11 +85,21 @@ Definition tokenize (s : string) : list string :=
     (fun l => string_of_list (rev l))
     (tokenize_helper white [] (list_of_string s)).
 
+Fixpoint token_list_to_string_helper (l : list token) : string :=
+    match l with
+    | [] => ""%string
+    | [h] => h ++ "]"%string
+    | h::q => h ++ ","%string ++ token_list_to_string_helper q
+    end.
+
+Definition token_list_to_string (l : list token) : string :=
+  "["%string ++ token_list_to_string_helper l.
+
 Module TestTokenize.
 
 Compute tokenize "let2if abcdefg123456 if let3 23 cdjnc 2a".
 Example test1 :
-    tokenize "let abc12=3;  223*(3+(a+c)) ;
+    tokenize "let abc12=3;  223*(3+(a+c));
     foo(drop(x))"
   = ["let";"abc12"; "="; "3"; ";"; "223";
      "*"; "("; "3"; "+"; "("; "a"; "+"; "c";
@@ -102,6 +110,16 @@ Proof. reflexivity. Qed.
 Example test2 : tokenize "let x = foo ( drop(y)) y;"
 = ["let"; "x"; "=";"foo"; "("; "drop"; "("; "y";
    ")"; ")"; "y"; ";"]%string.
+Proof. reflexivity. Qed.
+
+Example test3 : tokenize "let x = {2, y, x = 3}; {3, 4}"
+= ["let"; "x"; "="; "{"; "2"; ","; "y"; ","; "x"; 
+   "="; "3"; "}"; ";"; "{"; "3"; ","; "4"; "}"]%string.
+Proof. reflexivity. Qed.
+
+Example test4 : tokenize "let x = {2, y, 2}; 4"
+= ["let"; "x"; "="; "{"; "2"; ","; "y"; ","; "2"; "}";
+   ";"; "4"]%string.
 Proof. reflexivity. Qed.
 
 Compute tokenize "let x = 4;".
@@ -189,10 +207,14 @@ Fixpoint parseSimpleExpression (steps : nat) (rest : list token)
   | O => Error "Too Much Steps for Parsing"
   | S n =>
   match rest with
-  | [] => Ok(Value UnitV, [])
+  | [] => Ok(Value PoisonV, [])
   | _::_ =>
-
   try
+    let+ ( _, rest) = (expect "{"%string) rest;
+    let+ ( l, rest) = (parseMultiple n "}"%string) rest;
+    let+ ( _, rest) = (expect "}"%string) rest;
+    Ok (Product l, rest)
+  or try
     let+ ( x, rest) = (firstExpect "let"%string parseIdentifier) rest;
     let+ (e1, rest) = (firstExpect "="%string (parseSimpleExpression n)) rest;
     let+ (e2, rest) = (firstExpect ";"%string (parseExpression n)) rest;
@@ -204,7 +226,7 @@ Fixpoint parseSimpleExpression (steps : nat) (rest : list token)
   or try
     let+ ( f, rest) = parseIdentifier rest;
     let+ ( _, rest) = (expect "("%string) rest;
-    let+ ( l, rest) = (parseArguments n) rest;
+    let+ ( l, rest) = (parseMultiple n ")"%string) rest;
     let+ ( _, rest) = (expect ")"%string) rest;
     Ok (FunctionCall f l, rest)
   or try
@@ -216,20 +238,20 @@ Fixpoint parseSimpleExpression (steps : nat) (rest : list token)
   or try
     let+ ( _, rest) = (expect "("%string) rest;
     let+ ( _, rest) = (expect ")"%string) rest;
-    Ok (Value UnitV, rest)
+    Ok (Value PoisonV, rest)
   or
     Error "Not managed to parse"
   end
   end
 
-with parseArguments (steps : nat) (rest : list token)
+  with parseMultiple (steps : nat) (end_str : string) (rest : list token)
   : result (list expression * list token) :=
   match steps with
   | O => Error "Too Much Steps for Parsing"
   | S n =>
   try
     let+ (e1, rest) = (parseExpression n) rest;
-    let+ ( l, rest) = (firstExpect ","%string (parseArguments n)) rest;
+    let+ ( l, rest) = (firstExpect ","%string (parseMultiple n end_str)) rest;
     Ok (e1 :: l, rest)
   or try
     let+ (e1, rest) = (parseExpression n) rest;
@@ -253,8 +275,6 @@ with parseExpression (steps : nat) (rest : list token)
     Ok (e, rest)
   end.
 
-Definition BigNat := 1000.
-
 Definition parseSimple (s : string) : result expression :=
   match parseSimpleExpression BigNat (tokenize s) with
   | Ok (res,  [] ) => Ok res
@@ -264,8 +284,9 @@ Definition parseSimple (s : string) : result expression :=
 
 Definition parse (s : string) : result expression :=
   match parseExpression BigNat (tokenize s) with
-  | Ok (res,  [] ) => Ok res
-  | Ok (res, _::_) => Error "Some token left to parse"
+  | Ok (res, []) => Ok res
+  | Ok (res,  l) => Error ("Some token left to parse:" ++ new_line 
+                     ++ (token_list_to_string l))
   | Error err => Error err
   end.
 
@@ -281,6 +302,11 @@ Compute parse "let x = y; let z23 = 3". (* Error *)
 Compute parse "foo23()".
 Compute parse "foo23(x)".
 Compute parse "foo23(x, y)".
+Compute parse "foo23(x, y);".
+Compute parse "x = {3, 4, 5}".
+Compute parse "let x = {2, y, 2}; 4".
+Compute parse "let x = {2, y, 2}; {3, 4}".
+Compute parse "let x = {2, y, x = 3} ; {3, x}".
 Compute parse "let x = foo23(); 4; x = 4".
 Compute parse "let x = foo23(x, y); 4".
 Compute parse "3 ; 4".
@@ -291,4 +317,12 @@ Compute parse "let abc let". (* Error *)
 Compute parse "let x = 4; let y = 12 ; 23".
 Compute parse "x = 4;".
 Compute parse "let x = 4; y = 12; 23".
+
+Compute parse "let x = 4; foo(3, y); x = 12".
+Compute expression_to_string 
+(Let "x"%string (Value (IntV 4))
+            (Sequence
+               (FunctionCall "foo"%string [Value (IntV 3); Var "y"%string])
+               (Assign "x"%string (Value (IntV 12))))).
+
 End TestParse.
