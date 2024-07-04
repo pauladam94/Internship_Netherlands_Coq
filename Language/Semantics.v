@@ -41,7 +41,14 @@ Definition state_to_string (st : state) : string :=
   | Pos b off => "(" ++ nat_to_string b ++ "," ++ nat_to_string off ++ ")"
   end.
 
-Fixpoint memory_value_to_string (mv : memory_value) : string :=
+Fixpoint symbol_table_to_string (env : symbol_table) : string :=
+  match env with
+  | [] => ""
+  | [(x, st)] => x ++ state_to_string st
+  | (x, st)::env => x ++ state_to_string st ++ "|" ++ symbol_table_to_string env
+  end.
+
+Definition memory_value_to_string (mv : memory_value) : string :=
   match mv with
   | Poison => "Poison"
   | Integer i => nat_to_string i
@@ -73,7 +80,7 @@ Fixpoint execution_stack_to_string (exe_stack : execution_stack) : string :=
       ++ execution_stack_to_string q
   end.
 
-Fixpoint execution_state_to_string (exe_state : execution_state) : string :=
+Definition execution_state_to_string (exe_state : execution_state) : string :=
   let (mem, exe_stack) := exe_state in
   "memory :" ++ new_line ++
   (memory_to_string mem) ++ new_line ++
@@ -100,7 +107,7 @@ Fixpoint wait_env (b : block) (env : symbol_table)
 Definition replace_next_wait (b : block) (ex_stack : execution_stack)
   : result execution_stack :=
 match ex_stack with
-| [] => Error "Nothing to replace, no more env"
+| [] => Ok []
 | (env, e) :: ex_stack' =>
     let+ new_env = wait_env b env;
       Ok ((new_env, e) ::ex_stack')
@@ -125,6 +132,13 @@ Definition allocate (v: value) (mem : memory) : (memory * block) :=
   | PoisonV => ((b, [Poison])::mem, b)
   end.
 
+Fixpoint get_state (x : variable) (env : symbol_table) : result state :=
+  match env with
+  | [] => Error ("Variable " ++ x ++ " not found in " 
+      ++ symbol_table_to_string env)
+  | (y, st)::env => if x =? y then Ok st else get_state x env
+  end.
+
 (********************************
   Function Operational Semantics
 *********************************)
@@ -137,29 +151,40 @@ Fixpoint semantics_expression_exec (step : nat) (ex_state : execution_state)
   let (mem, ex_stack) := ex_state in
 
   match ex_stack with
-  | [] => Error "Todo empty stack"
-  | (env, e)::ex_stack' =>
+  | [] => Error "Execution stack should never be empty"
+  | [(env, Value v)] => Ok (mem, [(env, Value v)])
+  | (env, e)::ex_stack =>
     match e with
     | Let x e1 e2 =>
       let new_ex_state := (mem,
-        [(env, e1)] ++ [((x, Wait)::env, e2)] ++ ex_stack') in
+        [(env, e1)] ++ [((x, Wait)::env, e2)] ++ ex_stack) in
       semantics_expression_exec n new_ex_state
+
     | FunctionCall f args => Error "Todo"
-    | Assign x e => Error "Todo"
+
+    | Assign x e =>
+      let state_x := get_state x env in
+      (* TODO change memory *)
+      semantics_expression_exec n (mem, (env, Value PoisonV)::ex_stack)
+
     | Var x =>
-      let+ b = get_block x env;
+      let++ b = get_block x env with "Error getting block Variable in env :"
+        ++ new_line ++ symbol_table_to_string env;
       let+ new_ex_stack = replace_next_wait b ex_stack;
-      Error "Todo"
+      semantics_expression_exec n (mem, ex_stack)
+
     | Value v =>
       let (mem, b) := allocate v mem in
-      let++ new_ex_stack = replace_next_wait b ex_stack'
-        with "Error Replace Wait";
+      let++ new_ex_stack = replace_next_wait b ex_stack
+        with "Error Replace Wait:";
       semantics_expression_exec n (mem, new_ex_stack)
+
     | Product l => Error "Todo product"
+
     | Sequence e1 e2 => semantics_expression_exec n
                    (mem,
                    [(env, e1)] ++
-                   [(env, e2)] ++ ex_stack')
+                   [(env, e2)] ++ ex_stack)
     end
   end
 
@@ -170,13 +195,18 @@ Definition executeTest (code : string) : result value :=
   let default_state := ([], [([], ast)]) in 
   let++ exec_state = semantics_expression_exec BigNat default_state
   with "Error During Execution:";
-  Error "Todo"
-.
-
+  match exec_state with
+  | (_,  [(_, Value v)]) => Ok v
+  | _ => Error ("Execution not finished" ++ new_line ++
+           "With this execution state :" ++ new_line ++
+             execution_state_to_string exec_state)
+  end.
 
 Module SemanticsTest.
-
+Compute executeTest "4".
+Compute executeTest "x = 3".
 Compute executeTest "let a = 4; 5".
+Compute executeTest "let a = 4; let y = a; a".
 End SemanticsTest.
 
 
