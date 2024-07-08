@@ -6,7 +6,7 @@ From Coq Require Import Strings.Ascii.
 
 Definition new_line := "
 "%string.
-
+Definition nl := new_line.
 (* BigInt use for making sure function terminates *)
 Definition BigNat := 1000.
 (* Check BigNat. *)

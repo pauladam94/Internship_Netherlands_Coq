@@ -201,17 +201,46 @@ match xs with
       Error "Expected number"
 end.
 
+Fixpoint parseMultipleVariable (steps : nat) (end_str : string) (rest : list token)
+  : result (list variable * list token) :=
+  match steps with
+  | 0 => Error "Too much steps for parsing"
+  | S n =>
+
+  try
+    let+ (e1, rest) = parseIdentifier rest;
+    let+ ( l, rest) = (firstExpect ","%string 
+      (parseMultipleVariable n end_str)) rest;
+    Ok (e1 :: l, rest)
+  or try
+    let+ (e1, rest) = parseIdentifier rest;
+    Ok ([e1], rest)
+  or
+    let+ ( _,    _) = (expect ")"%string) rest;
+    Ok ([], rest)
+
+  end.
+
 Fixpoint parseSimpleExpression (steps : nat) (rest : list token)
   : result (expression * list token) :=
   match steps with
   | O => Error "Too Much Steps for Parsing"
   | S n =>
   match rest with
-  | [] => Ok(Value PoisonV, [])
+  | [] => Ok(Value Poison, [])
   | _::_ =>
+
   try
+    let+ ( _, rest) = (expect "*"%string) rest;
+    let+ ( x, rest) = parseIdentifier rest;
+    Ok (Deref x, rest)
+  or try
+    let+ ( _, rest) = (expect "&"%string) rest;
+    let+ ( x, rest) = parseIdentifier rest;
+    Ok (Borrow x, rest)
+  or try
     let+ ( _, rest) = (expect "{"%string) rest;
-    let+ ( l, rest) = (parseMultiple n "}"%string) rest;
+    let+ ( l, rest) = (parseMultipleVariable n "}"%string) rest;
     let+ ( _, rest) = (expect "}"%string) rest;
     Ok (Product l, rest)
   or try
@@ -222,44 +251,48 @@ Fixpoint parseSimpleExpression (steps : nat) (rest : list token)
   or try
     let+ ( x, rest) = parseIdentifier rest;
     let+ ( e, rest) = (firstExpect "="%string (parseSimpleExpression n)) rest;
-    Ok (Assign x e, rest)
+      match e with
+      | Var y => Ok (Assign x y, rest)
+      | _  => Ok (Let "phantom"%string e (Assign x "phantom"%string), rest)
+      end
   or try
     let+ ( f, rest) = parseIdentifier rest;
     let+ ( _, rest) = (expect "("%string) rest;
-    let+ ( l, rest) = (parseMultiple n ")"%string) rest;
+    (* TODO Transformer les expression en variables bien posés *)
+    let+ ( l, rest) = (parseMultipleVariable n ")"%string) rest;
     let+ ( _, rest) = (expect ")"%string) rest;
     Ok (FunctionCall f l, rest)
   or try
     let+ ( i, rest) = parseNumber rest;
-    Ok (Value (IntV i), rest)
+    Ok (Value (Integer i), rest)
   or try
     let+ ( x, rest) = parseIdentifier rest;
     Ok (Var x, rest)
   or try
     let+ ( _, rest) = (expect "("%string) rest;
     let+ ( _, rest) = (expect ")"%string) rest;
-    Ok (Value PoisonV, rest)
+    Ok (Value Poison, rest)
   or
     Error "Not managed to parse"
   end
   end
 
-  with parseMultiple (steps : nat) (end_str : string) (rest : list token)
-  : result (list expression * list token) :=
-  match steps with
-  | O => Error "Too Much Steps for Parsing"
-  | S n =>
-  try
-    let+ (e1, rest) = (parseExpression n) rest;
-    let+ ( l, rest) = (firstExpect ","%string (parseMultiple n end_str)) rest;
-    Ok (e1 :: l, rest)
-  or try
-    let+ (e1, rest) = (parseExpression n) rest;
-    Ok ([e1], rest)
-  or
-    let+ ( _,    _) = (expect ")"%string) rest;
-    Ok ([], rest)
-  end
+  (* with parseMultiple (steps : nat) (end_str : string) (rest : list token) *)
+  (* : result (list expression * list token) := *)
+  (* match steps with *)
+  (* | O => Error "Too Much Steps for Parsing" *)
+  (* | S n => *)
+  (* try *)
+  (*   let+ (e1, rest) = (parseExpression n) rest; *)
+  (*   let+ ( l, rest) = (firstExpect ","%string (parseMultiple n end_str)) rest; *)
+  (*   Ok (e1 :: l, rest) *)
+  (* or try *)
+  (*   let+ (e1, rest) = (parseExpression n) rest; *)
+  (*   Ok ([e1], rest) *)
+  (* or *)
+  (*   let+ ( _,    _) = (expect ")"%string) rest; *)
+  (*   Ok ([], rest) *)
+  (* end *)
 
 with parseExpression (steps : nat) (rest : list token)
   : result (expression * list token) :=
@@ -303,10 +336,10 @@ Compute parse "foo23()".
 Compute parse "foo23(x)".
 Compute parse "foo23(x, y)".
 Compute parse "foo23(x, y);".
-Compute parse "x = {3, 4, 5}".
-Compute parse "let x = {2, y, 2}; 4".
-Compute parse "let x = {2, y, 2}; {3, 4}".
-Compute parse "let x = {2, y, x = 3} ; {3, x}".
+Compute parse "x = {x3, x4, y}".
+Compute parse "let x = {x, y, z}; 4".
+Compute parse "let x = {z, y, a2}; {a, b}".
+Compute parse "let x = {z, y, A} ; {c, x}".
 Compute parse "let x = foo23(); 4; x = 4".
 Compute parse "let x = foo23(x, y); 4".
 Compute parse "3 ; 4".
@@ -317,12 +350,14 @@ Compute parse "let abc let". (* Error *)
 Compute parse "let x = 4; let y = 12 ; 23".
 Compute parse "x = 4;".
 Compute parse "let x = 4; y = 12; 23".
+Compute parse "let x = 4; foo(x, y); x = 12".
+Compute parse "let x = &x123; *y".
+Compute parse "&x123".
 
-Compute parse "let x = 4; foo(3, y); x = 12".
 Compute expression_to_string 
-(Let "x"%string (Value (IntV 4))
+(Let "x"%string (Value (Integer 4))
             (Sequence
-               (FunctionCall "foo"%string [Value (IntV 3); Var "y"%string])
-               (Assign "x"%string (Value (IntV 12))))).
+               (FunctionCall "foo"%string ["z"%string ;  "y"%string])
+               (Assign "x"%string ("x2"%string)))).
 
 End TestParse.
