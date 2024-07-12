@@ -1,12 +1,12 @@
-From Language Require Import Language.
-From Language Require Import Parse.
-From Language Require Import Error.
 Require Import Coq.Bool.Bool.
 Require Import Coq.Strings.String.
 Local Open Scope string_scope.
-Require Import Coq.Lists.List.
+Require Import Coq.Lists.List. Import ListNotations.
 Require Import Integers.
-Import ListNotations.
+
+From Language Require Import Language.
+From Language Require Import ParseExpression.
+From Language Require Import Error.
 
 (****************************
    Relation Typing Expression

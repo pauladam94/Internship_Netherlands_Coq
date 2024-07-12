@@ -2,9 +2,10 @@ From Coq Require Import Strings.String.
 From Coq Require Import Strings.Ascii.
 From Coq Require Import Init.Nat.
 From Coq Require Import Lists.List. Import ListNotations.
+From Language Require Import Utils.
 From Language Require Import Error.
 From Language Require Import Language.
-From Language Require Import Utils.
+From Language Require Import Expression.
 
 Definition isWhite (c : ascii) : bool :=
   let n := nat_of_ascii c in
@@ -55,6 +56,10 @@ Fixpoint tokenize_helper (cls : chartype) (acc xs : list ascii)
   | [] => tk
   | (x::xs') =>
     match cls, classifyChar x, x with
+    | _, _, "&"      =>
+      tk ++ ["&"]::(tokenize_helper other [] xs')
+    | _, _, "*"      =>
+      tk ++ ["*"]::(tokenize_helper other [] xs')
     | _, _, ";"      =>
       tk ++ [";"]::(tokenize_helper other [] xs')
     | _, _, "{"      =>
@@ -88,12 +93,12 @@ Definition tokenize (s : string) : list string :=
 Fixpoint token_list_to_string_helper (l : list token) : string :=
     match l with
     | [] => ""%string
-    | [h] => h ++ "]"%string
-    | h::q => h ++ ","%string ++ token_list_to_string_helper q
+    | [h] => h
+    | h::q => "'" ++ h ++ "',"%string ++ token_list_to_string_helper q
     end.
 
 Definition token_list_to_string (l : list token) : string :=
-  "["%string ++ token_list_to_string_helper l.
+  "["%string ++ token_list_to_string_helper l ++ "]"%string.
 
 Module TestTokenize.
 
@@ -131,16 +136,17 @@ End TestTokenize.
 (* Definition parser (T : Type) := *)
 (*   list token -> result (T * list token). *)
 
-Fixpoint many_helper {T} 
-  (p : list token -> result (T * list token)) 
-  acc steps xs :=
+Fixpoint many_helper {T}
+  (p : list token -> result (T * list token)) (acc : list T)
+  (steps : nat) (xs : list token)
+  : result (list T * list token) :=
   match steps, p xs with
   | 0, _ =>
       Error "Too many recursive calls"
   | _, Error _ =>
       Ok ((rev acc), xs)
-  | S steps', Ok (t, xs') =>
-      many_helper p (t :: acc) steps' xs'
+  | S n, Ok (t, xs') =>
+      many_helper p (t :: acc) n xs'
   end.
 
 (** A (step-indexed) parser that expects zero or more [p]s: *)
@@ -201,7 +207,7 @@ match xs with
       Error "Expected number"
 end.
 
-Fixpoint parseMultipleVariable (steps : nat) (end_str : string) (rest : list token)
+Fixpoint parse_multiple_variable (steps : nat) (end_str : string) (rest : list token)
   : result (list variable * list token) :=
   match steps with
   | 0 => Error "Too much steps for parsing"
@@ -210,7 +216,7 @@ Fixpoint parseMultipleVariable (steps : nat) (end_str : string) (rest : list tok
   try
     let+ (e1, rest) = parseIdentifier rest;
     let+ ( l, rest) = (firstExpect ","%string 
-      (parseMultipleVariable n end_str)) rest;
+      (parse_multiple_variable n end_str)) rest;
     Ok (e1 :: l, rest)
   or try
     let+ (e1, rest) = parseIdentifier rest;
@@ -219,6 +225,35 @@ Fixpoint parseMultipleVariable (steps : nat) (end_str : string) (rest : list tok
     let+ ( _,    _) = (expect ")"%string) rest;
     Ok ([], rest)
 
+  end.
+
+(* Let : string -> expression -> expression -> expression *)
+Fixpoint list_expression_style_helper (n : nat) (l : list expression)
+  (lv : list variable) (f : list variable -> expression) : expression :=
+  match l with
+  | [] => f lv
+  | e0::l =>
+    match e0 with
+    | Var x => list_expression_style_helper n l (x::lv) f
+    | _ =>
+      let x := (String.append "phantom"%string (nat_to_string n)) in
+      let e := list_expression_style_helper (S n) l (x::lv) f in
+        (Let x e0 e)
+    end
+  end.
+
+Definition list_expression_style (l : list expression)
+  (f : list variable -> expression) : expression :=
+  list_expression_style_helper 0 l [] f.
+
+Definition two_expression_style (e1 e2 : expression)
+  (f : variable -> variable -> expression) : expression :=
+  match e1, e2 with
+  | Var x, Var y => f x y
+  | Var x, _ => Let "phantom"%string e2 (f x "phantom"%string)
+  | _, Var y => Let "phantom"%string e1 (f "phantom"%string y)
+  | _, _ => Let "phantom1"%string e1 (Let "phantom2"%string e2 
+    (f "phantom1"%string "phantom2"%string))
   end.
 
 Fixpoint parseSimpleExpression (steps : nat) (rest : list token)
@@ -233,6 +268,14 @@ Fixpoint parseSimpleExpression (steps : nat) (rest : list token)
   try
     let+ ( _, rest) = (expect "*"%string) rest;
     let+ ( x, rest) = parseIdentifier rest;
+    let+ ( e, rest) = (firstExpect "="%string (parseSimpleExpression n)) rest;
+      match e with
+      | Var y => Ok (DerefAssign x y, rest)
+      | _  => Ok (Let "phantom"%string e (DerefAssign x "phantom"%string), rest)
+      end
+  or try
+    let+ ( _, rest) = (expect "*"%string) rest;
+    let+ ( x, rest) = parseIdentifier rest;
     Ok (Deref x, rest)
   or try
     let+ ( _, rest) = (expect "&"%string) rest;
@@ -240,14 +283,19 @@ Fixpoint parseSimpleExpression (steps : nat) (rest : list token)
     Ok (Borrow x, rest)
   or try
     let+ ( _, rest) = (expect "{"%string) rest;
-    let+ ( l, rest) = (parseMultipleVariable n "}"%string) rest;
+    let+ ( l, rest) = (parseMultiple n "}"%string) rest;
     let+ ( _, rest) = (expect "}"%string) rest;
-    Ok (Product l, rest)
+    Ok (list_expression_style l Product, rest)
   or try
     let+ ( x, rest) = (firstExpect "let"%string parseIdentifier) rest;
     let+ (e1, rest) = (firstExpect "="%string (parseSimpleExpression n)) rest;
     let+ (e2, rest) = (firstExpect ";"%string (parseExpression n)) rest;
     Ok (Let x e1 e2, rest)
+  or try
+    let+ ( x, rest) = (firstExpect "let"%string parseIdentifier) rest;
+    let+ (e1, rest) = (firstExpect "="%string (parseSimpleExpression n)) rest;
+    let+ (e2, rest) = expect ";"%string rest;
+    Ok (Let x e1 (Value Poison), rest)
   or try
     let+ ( x, rest) = parseIdentifier rest;
     let+ ( e, rest) = (firstExpect "="%string (parseSimpleExpression n)) rest;
@@ -258,16 +306,25 @@ Fixpoint parseSimpleExpression (steps : nat) (rest : list token)
   or try
     let+ ( f, rest) = parseIdentifier rest;
     let+ ( _, rest) = (expect "("%string) rest;
-    (* TODO Transformer les expression en variables bien posés *)
-    let+ ( l, rest) = (parseMultipleVariable n ")"%string) rest;
+    let+ ( l, rest) = (parseMultiple n ")"%string) rest;
     let+ ( _, rest) = (expect ")"%string) rest;
-    Ok (FunctionCall f l, rest)
-  or try
-    let+ ( i, rest) = parseNumber rest;
-    Ok (Value (Integer i), rest)
+    Ok (list_expression_style l (FunctionCall f), rest)
+  (* or try *)
+  (*   let+ (e1, rest) = parseSimpleExpression n rest; *)
+  (*   let+ ( _, rest) = (expect "+"%string) rest; *)
+  (*   let+ (e2, rest) = parseSimpleExpression n rest; *)
+  (*   Ok (two_expression_style e1 e2 (Op Add), rest) *)
+  (* or try *)
+  (*   let+ ( x, rest) = parseIdentifier rest; *)
+  (*   let+ ( _, rest) = (expect "-"%string) rest; *)
+  (*   let+ ( y, rest) = parseIdentifier rest; *)
+  (*   Ok (Op Add x y, rest) *)
   or try
     let+ ( x, rest) = parseIdentifier rest;
     Ok (Var x, rest)
+  or try
+    let+ ( i, rest) = parseNumber rest;
+    Ok (Value (Integer i), rest)
   or try
     let+ ( _, rest) = (expect "("%string) rest;
     let+ ( _, rest) = (expect ")"%string) rest;
@@ -277,22 +334,22 @@ Fixpoint parseSimpleExpression (steps : nat) (rest : list token)
   end
   end
 
-  (* with parseMultiple (steps : nat) (end_str : string) (rest : list token) *)
-  (* : result (list expression * list token) := *)
-  (* match steps with *)
-  (* | O => Error "Too Much Steps for Parsing" *)
-  (* | S n => *)
-  (* try *)
-  (*   let+ (e1, rest) = (parseExpression n) rest; *)
-  (*   let+ ( l, rest) = (firstExpect ","%string (parseMultiple n end_str)) rest; *)
-  (*   Ok (e1 :: l, rest) *)
-  (* or try *)
-  (*   let+ (e1, rest) = (parseExpression n) rest; *)
-  (*   Ok ([e1], rest) *)
-  (* or *)
-  (*   let+ ( _,    _) = (expect ")"%string) rest; *)
-  (*   Ok ([], rest) *)
-  (* end *)
+with parseMultiple (steps : nat) (end_str : string) (rest : list token)
+  : result (list expression * list token) :=
+  match steps with
+  | O => Error "Too Much Steps for Parsing"
+  | S n =>
+  try
+    let+ (e1, rest) = (parseExpression n) rest;
+    let+ ( l, rest) = (firstExpect ","%string (parseMultiple n end_str)) rest;
+    Ok (e1 :: l, rest)
+  or try
+    let+ (e1, rest) = (parseExpression n) rest;
+    Ok ([e1], rest)
+  or
+    let+ ( _,    _) = (expect ")"%string) rest;
+    Ok ([], rest)
+  end
 
 with parseExpression (steps : nat) (rest : list token)
   : result (expression * list token) :=
@@ -302,7 +359,11 @@ with parseExpression (steps : nat) (rest : list token)
   try
     let+ (e1, rest) = (parseSimpleExpression n) rest;
     let+ (e2, rest) = (firstExpect ";"%string (parseExpression n)) rest;
-    Ok (Sequence e1 e2, rest)
+    Ok (Let "_"%string e1 e2, rest)
+  or try
+    let+ (e1, rest) = (parseSimpleExpression n) rest;
+    let+ (e2, rest) = expect ";"%string rest;
+    Ok (Let "_"%string e1 (Value Poison), rest)
   or
     let+ ( e, rest) = (parseSimpleExpression n) rest;
     Ok (e, rest)
@@ -325,19 +386,24 @@ Definition parse (s : string) : result expression :=
 
 Module TestParse.
 Compute parse "3".
+Compute parse "plus(3, 4)".
 Compute parse "x234".
 Compute parse "x = 4".
 Compute parse "x = y".
 Compute parse "let x = y;".
+Compute parse "let x = {4, 3}; 5".
+Compute parse "{x, 3}".
+Compute parse "let x = 4; f(4); 5".
+Compute parse "foo(3, 4, x)".
 Compute parse "let x = y; 3".
 Compute parse "let x = y; let z23 = 3;".
 Compute parse "let x = y; let z23 = 3". (* Error *)
 Compute parse "foo23()".
 Compute parse "foo23(x)".
-Compute parse "foo23(x, y)".
+Compute parse "let x = 2; foo23(x, 42)".
 Compute parse "foo23(x, y);".
-Compute parse "x = {x3, x4, y}".
-Compute parse "let x = {x, y, z}; 4".
+Compute parse "x = {x3, x4, x}".
+Compute parse "let x = {x, y, 3}; 4".
 Compute parse "let x = {z, y, a2}; {a, b}".
 Compute parse "let x = {z, y, A} ; {c, x}".
 Compute parse "let x = foo23(); 4; x = 4".
@@ -353,10 +419,14 @@ Compute parse "let x = 4; y = 12; 23".
 Compute parse "let x = 4; foo(x, y); x = 12".
 Compute parse "let x = &x123; *y".
 Compute parse "&x123".
+Compute parse "*x = y".
+Compute parse "let x = 12; *x = y".
+Compute parse "*x = 3".
+Compute parse "{{x, y}; , z} ".
 
-Compute expression_to_string 
+Compute expression_to_string
 (Let "x"%string (Value (Integer 4))
-            (Sequence
+            (Let ""%string
                (FunctionCall "foo"%string ["z"%string ;  "y"%string])
                (Assign "x"%string ("x2"%string)))).
 
