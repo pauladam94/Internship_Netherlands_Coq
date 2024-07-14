@@ -23,10 +23,13 @@ Fixpoint program_to_string (p : program) : string :=
     function_definition_to_string f_def ++ program_to_string p
   end.
 
-Fixpoint get_function_expression (f : function_name) (p : program)
-  : result expression :=
+Fixpoint get_function_args_expression (f : function_name) (p : program)
+  : result (list variable * expression) :=
   match p with
   | [] => Error "Function 'main' not found in the program"
-  | ((f0, _) ,e)::p =>
-    if String.eqb f0 f then Ok e else get_function_expression f p
+  | ((f0, args) ,e)::p =>
+    if String.eqb f0 f then
+      Ok (args, e)
+    else
+      get_function_args_expression f p
   end.

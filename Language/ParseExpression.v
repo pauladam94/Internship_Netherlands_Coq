@@ -90,15 +90,15 @@ Definition tokenize (s : string) : list string :=
     (fun l => string_of_list (rev l))
     (tokenize_helper white [] (list_of_string s)).
 
-Fixpoint token_list_to_string_helper (l : list token) : string :=
+Fixpoint list_token_to_string_helper (l : list token) : string :=
     match l with
     | [] => ""%string
-    | [h] => h
-    | h::q => "'" ++ h ++ "',"%string ++ token_list_to_string_helper q
+    | [h] => "'" ++ h ++ "'"
+    | h::q => "'" ++ h ++ "',"%string ++ list_token_to_string_helper q
     end.
 
-Definition token_list_to_string (l : list token) : string :=
-  "["%string ++ token_list_to_string_helper l ++ "]"%string.
+Definition list_token_to_string (l : list token) : string :=
+  "["%string ++ list_token_to_string_helper l ++ "]"%string.
 
 Module TestTokenize.
 
@@ -175,7 +175,7 @@ Definition expect (t : token) : list token -> result (unit * list token) :=
   firstExpect t (fun xs => Ok (tt, xs)).
 
 (* We suppose that we get token from the previous lexer *)
-Definition parseIdentifier
+Definition parse_identifier
   (l : list token) : result (string * list token) :=
   match l with 
   | [] => Error "Expected identifier"
@@ -214,12 +214,12 @@ Fixpoint parse_multiple_variable (steps : nat) (end_str : string) (rest : list t
   | S n =>
 
   try
-    let+ (e1, rest) = parseIdentifier rest;
+    let+ (e1, rest) = parse_identifier rest;
     let+ ( l, rest) = (firstExpect ","%string 
       (parse_multiple_variable n end_str)) rest;
     Ok (e1 :: l, rest)
   or try
-    let+ (e1, rest) = parseIdentifier rest;
+    let+ (e1, rest) = parse_identifier rest;
     Ok ([e1], rest)
   or
     let+ ( _,    _) = (expect ")"%string) rest;
@@ -256,7 +256,7 @@ Definition two_expression_style (e1 e2 : expression)
     (f "phantom1"%string "phantom2"%string))
   end.
 
-Fixpoint parseSimpleExpression (steps : nat) (rest : list token)
+Fixpoint parse_simple_expression (steps : nat) (rest : list token)
   : result (expression * list token) :=
   match steps with
   | O => Error "Too Much Steps for Parsing"
@@ -266,127 +266,144 @@ Fixpoint parseSimpleExpression (steps : nat) (rest : list token)
   | _::_ =>
 
   try
-    let+ ( _, rest) = (expect "*"%string) rest;
-    let+ ( x, rest) = parseIdentifier rest;
-    let+ ( e, rest) = (firstExpect "="%string (parseSimpleExpression n)) rest;
+    let+ (  _, rest) = expect "*"%string rest;
+    let+ (  x, rest) = parse_identifier rest;
+    let+ (  e, rest) = firstExpect "="%string (parse_simple_expression n) rest;
       match e with
       | Var y => Ok (DerefAssign x y, rest)
       | _  => Ok (Let "phantom"%string e (DerefAssign x "phantom"%string), rest)
       end
   or try
-    let+ ( _, rest) = (expect "*"%string) rest;
-    let+ ( x, rest) = parseIdentifier rest;
+    let+ (  _, rest) = expect "*"%string rest;
+    let+ (  x, rest) = parse_identifier rest;
     Ok (Deref x, rest)
   or try
-    let+ ( _, rest) = (expect "&"%string) rest;
-    let+ ( x, rest) = parseIdentifier rest;
+    let+ (  _, rest) = expect "if"%string rest;
+    let+ ( e1, rest) = parse_expression n rest;
+    let+ (  _, rest) = expect "=="%string rest;
+    let+ ( e2, rest) = parse_expression n rest;
+    let+ (  _, rest) = expect "{"%string rest;
+    let+ (fst, rest) = parse_expression n rest;
+    let+ (  _, rest) = expect "}"%string rest;
+    let+ (  _, rest) = expect "else"%string rest;
+    let+ (  _, rest) = expect "{"%string rest;
+    let+ (snd, rest) = parse_expression n rest;
+    let+ (  _, rest) = expect "}"%string rest;
+    Ok (two_expression_style e1 e2 (fun x y => IfEqual x y fst snd), rest)
+  or try
+    let+ (  _, rest) = expect "&"%string rest;
+    let+ (  x, rest) = parse_identifier rest;
     Ok (Borrow x, rest)
   or try
-    let+ ( _, rest) = (expect "{"%string) rest;
-    let+ ( l, rest) = (parseMultiple n "}"%string) rest;
-    let+ ( _, rest) = (expect "}"%string) rest;
+    let+ (  _, rest) = expect "{"%string rest;
+    let+ (  l, rest) = parse_multiple n "}"%string rest;
+    let+ (  _, rest) = expect "}"%string rest;
     Ok (list_expression_style l Product, rest)
   or try
-    let+ ( x, rest) = (firstExpect "let"%string parseIdentifier) rest;
-    let+ (e1, rest) = (firstExpect "="%string (parseSimpleExpression n)) rest;
-    let+ (e2, rest) = (firstExpect ";"%string (parseExpression n)) rest;
+    let+ (  x, rest) = firstExpect "let"%string parse_identifier rest;
+    let+ ( e1, rest) = firstExpect "="%string (parse_simple_expression n) rest;
+    let+ ( e2, rest) = firstExpect ";"%string (parse_expression n) rest;
     Ok (Let x e1 e2, rest)
   or try
-    let+ ( x, rest) = (firstExpect "let"%string parseIdentifier) rest;
-    let+ (e1, rest) = (firstExpect "="%string (parseSimpleExpression n)) rest;
-    let+ (e2, rest) = expect ";"%string rest;
+    let+ (  x, rest) = firstExpect "let"%string parse_identifier rest;
+    let+ ( e1, rest) = firstExpect "="%string (parse_simple_expression n) rest;
+    let+ ( e2, rest) = expect ";"%string rest;
     Ok (Let x e1 (Value Poison), rest)
   or try
-    let+ ( x, rest) = parseIdentifier rest;
-    let+ ( e, rest) = (firstExpect "="%string (parseSimpleExpression n)) rest;
-      match e with
-      | Var y => Ok (Assign x y, rest)
-      | _  => Ok (Let "phantom"%string e (Assign x "phantom"%string), rest)
-      end
+    let+ (  x, rest) = parse_identifier rest;
+    let+ (  e, rest) = firstExpect "="%string (parse_simple_expression n) rest;
+    match e with
+    | Var y => Ok (Assign x y, rest)
+    | _  => Ok (Let "phantom"%string e (Assign x "phantom"%string), rest)
+    end
   or try
-    let+ ( f, rest) = parseIdentifier rest;
-    let+ ( _, rest) = (expect "("%string) rest;
-    let+ ( l, rest) = (parseMultiple n ")"%string) rest;
-    let+ ( _, rest) = (expect ")"%string) rest;
+    let+ (  f, rest) = parse_identifier rest;
+    let+ (  _, rest) = expect "("%string rest;
+    let+ (  l, rest) = parse_multiple n ")"%string rest;
+    let+ (  _, rest) = expect ")"%string rest;
     Ok (list_expression_style l (FunctionCall f), rest)
-  (* or try *)
-  (*   let+ (e1, rest) = parseSimpleExpression n rest; *)
-  (*   let+ ( _, rest) = (expect "+"%string) rest; *)
-  (*   let+ (e2, rest) = parseSimpleExpression n rest; *)
-  (*   Ok (two_expression_style e1 e2 (Op Add), rest) *)
-  (* or try *)
-  (*   let+ ( x, rest) = parseIdentifier rest; *)
-  (*   let+ ( _, rest) = (expect "-"%string) rest; *)
-  (*   let+ ( y, rest) = parseIdentifier rest; *)
-  (*   Ok (Op Add x y, rest) *)
   or try
-    let+ ( x, rest) = parseIdentifier rest;
+    let+ (  _, rest) = expect "("%string rest;
+    let+ ( e1, rest) = parse_simple_expression n rest;
+    let+ (  _, rest) = expect "+"%string rest;
+    let+ ( e2, rest) = parse_simple_expression n rest;
+    let+ (  _, rest) = expect ")"%string rest;
+    Ok (two_expression_style e1 e2 (Op Add), rest)
+  or try
+    let+ (  _, rest) = expect "("%string rest;
+    let+ ( e1, rest) = parse_simple_expression n rest;
+    let+ (  _, rest) = expect "-"%string rest;
+    let+ ( e2, rest) = parse_simple_expression n rest;
+    let+ (  _, rest) = expect ")"%string rest;
+    Ok (two_expression_style e1 e2 (Op Sub), rest)
+  or try
+    let+ (  x, rest) = parse_identifier rest;
     Ok (Var x, rest)
   or try
-    let+ ( i, rest) = parseNumber rest;
+    let+ (  i, rest) = parseNumber rest;
     Ok (Value (Integer i), rest)
   or try
-    let+ ( _, rest) = (expect "("%string) rest;
-    let+ ( _, rest) = (expect ")"%string) rest;
+    let+ (  _, rest) = expect "("%string rest;
+    let+ (  _, rest) = expect ")"%string rest;
     Ok (Value Poison, rest)
   or
     Error "Not managed to parse"
   end
   end
 
-with parseMultiple (steps : nat) (end_str : string) (rest : list token)
+with parse_multiple (steps : nat) (end_str : string) (rest : list token)
   : result (list expression * list token) :=
   match steps with
   | O => Error "Too Much Steps for Parsing"
   | S n =>
   try
-    let+ (e1, rest) = (parseExpression n) rest;
-    let+ ( l, rest) = (firstExpect ","%string (parseMultiple n end_str)) rest;
+    let+ (e1, rest) = (parse_expression n) rest;
+    let+ ( l, rest) = (firstExpect ","%string (parse_multiple n end_str)) rest;
     Ok (e1 :: l, rest)
   or try
-    let+ (e1, rest) = (parseExpression n) rest;
+    let+ (e1, rest) = (parse_expression n) rest;
     Ok ([e1], rest)
   or
     let+ ( _,    _) = (expect ")"%string) rest;
     Ok ([], rest)
   end
 
-with parseExpression (steps : nat) (rest : list token)
+with parse_expression (steps : nat) (rest : list token)
   : result (expression * list token) :=
   match steps with
   | O => Error "Too Much Steps for Parsing"
   | S n =>
   try
-    let+ (e1, rest) = (parseSimpleExpression n) rest;
-    let+ (e2, rest) = (firstExpect ";"%string (parseExpression n)) rest;
+    let+ (e1, rest) = (parse_simple_expression n) rest;
+    let+ (e2, rest) = (firstExpect ";"%string (parse_expression n)) rest;
     Ok (Let "_"%string e1 e2, rest)
   or try
-    let+ (e1, rest) = (parseSimpleExpression n) rest;
+    let+ (e1, rest) = (parse_simple_expression n) rest;
     let+ (e2, rest) = expect ";"%string rest;
     Ok (Let "_"%string e1 (Value Poison), rest)
   or
-    let+ ( e, rest) = (parseSimpleExpression n) rest;
+    let+ ( e, rest) = (parse_simple_expression n) rest;
     Ok (e, rest)
   end.
 
 Definition parseSimple (s : string) : result expression :=
-  match parseSimpleExpression BigNat (tokenize s) with
+  match parse_simple_expression BigNat (tokenize s) with
   | Ok (res,  [] ) => Ok res
   | Ok (res, _::_) => Error "Some token left to parse"
   | Error err => Error err
   end.
 
 Definition parse (s : string) : result expression :=
-  match parseExpression BigNat (tokenize s) with
+  match parse_expression BigNat (tokenize s) with
   | Ok (res, []) => Ok res
   | Ok (res,  l) => Error ("Some token left to parse:" ++ new_line 
-                     ++ (token_list_to_string l))
+                     ++ (list_token_to_string l))
   | Error err => Error err
   end.
-
 Module TestParse.
+Compute parse "".
 Compute parse "3".
-Compute parse "plus(3, 4)".
+Compute parse "(3 + 4)".
 Compute parse "x234".
 Compute parse "x = 4".
 Compute parse "x = y".
@@ -397,6 +414,7 @@ Compute parse "let x = 4; f(4); 5".
 Compute parse "foo(3, 4, x)".
 Compute parse "let x = y; 3".
 Compute parse "let x = y; let z23 = 3;".
+Compute parse "let x = y; let z23 = 3; (42 + a = b)".
 Compute parse "let x = y; let z23 = 3". (* Error *)
 Compute parse "foo23()".
 Compute parse "foo23(x)".
@@ -423,6 +441,9 @@ Compute parse "*x = y".
 Compute parse "let x = 12; *x = y".
 Compute parse "*x = 3".
 Compute parse "{{x, y}; , z} ".
+Compute parse "if {1, 2} == 4 {3} else {4}".
+Compute parse "if x == 2 {3} else {4}".
+Compute parse "let a = 4; if a == 1 {4} else {a = 12}".
 
 Compute expression_to_string
 (Let "x"%string (Value (Integer 4))

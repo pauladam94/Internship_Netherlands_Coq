@@ -26,12 +26,13 @@ Inductive expression : Type :=
   (* | Sequence (e1 e2 : expression) *)
   | Borrow (v : variable)
   | Deref (v : variable)
-  | Op (op : operation) (x y : variable).
+  | Op (op : operation) (x y : variable)
+  | IfEqual (x y: variable) (first : expression) (second : expression).
 
 Fixpoint expression_to_string (e : expression) : string :=
   match e with
   | Let x e1 e2 => "(let " ++ x ++ " = " ++ expression_to_string e1  ++ ";"
-      ++ nl ++ expression_to_string e2 ++ ")"
+    ++ nl ++ expression_to_string e2 ++ ")"
   | FunctionCall f args => f ++ "(" ++ args_to_string args ++ ")"
   | DerefAssign x y => "*" ++ x ++ " = " ++ y
   | Assign x y => x ++ " = " ++ y
@@ -41,4 +42,8 @@ Fixpoint expression_to_string (e : expression) : string :=
   | Borrow x => "&" ++ x
   | Deref x => "*" ++ x
   | Op op x y => x ++ " " ++ operation_to_string op ++ " " ++ y
+  | IfEqual x y first second => "if" ++ x ++ "==" ++ y ++ "{" ++ nl ++
+    expression_to_string first ++ nl ++
+    "} else" ++ "{" ++ nl ++
+    expression_to_string second ++ nl ++ "}"
   end.
