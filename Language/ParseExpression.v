@@ -322,6 +322,15 @@ Fixpoint parse_simple_expression (steps : nat) (rest : list token)
     let+ (  l, rest) = parse_multiple n ")"%string rest;
     let+ (  _, rest) = expect ")"%string rest;
     Ok (list_expression_style l (FunctionCall f), rest)
+  (* or try *)
+  (*   let+ (  _, rest) = expect "+"%string rest; *)
+  (*   let+ ( e2, rest) = parse_simple_expression n rest; *)
+  (*   Ok (two_expression_style (Value (Integer 0)) e2 (Op Add), rest) *)
+  (* or try *)
+  (*   let+ ( e1, rest) = parse_simple_expression n rest; *)
+  (*   let+ (  _, rest) = expect "+"%string rest; *)
+  (*   let+ ( e2, rest) = parse_simple_expression n rest; *)
+  (*   Ok (two_expression_style e1 e2 (Op Add), rest) *)
   or try
     let+ (  _, rest) = expect "("%string rest;
     let+ ( e1, rest) = parse_simple_expression n rest;
@@ -342,12 +351,10 @@ Fixpoint parse_simple_expression (steps : nat) (rest : list token)
   or try
     let+ (  i, rest) = parseNumber rest;
     Ok (Value (Integer i), rest)
-  or try
+  or
     let+ (  _, rest) = expect "("%string rest;
     let+ (  _, rest) = expect ")"%string rest;
     Ok (Value Poison, rest)
-  or
-    Error "Not managed to parse"
   end
   end
 
@@ -404,6 +411,7 @@ Module TestParse.
 Compute parse "".
 Compute parse "3".
 Compute parse "(3 + 4)".
+Compute parse "let a = (3 + 4) ; 2".
 Compute parse "x234".
 Compute parse "x = 4".
 Compute parse "x = y".
