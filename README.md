@@ -15,4 +15,4 @@ Error: Utils
 Language: Utils
 Parse: Utils, Error, Language
 Semantics: Utils, Language, Error, Parse
-Typing: 
+Typing: Not Done for now

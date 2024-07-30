@@ -19,12 +19,15 @@ Inductive semaphore : Type :=
   | Reading (n : nat).
 Definition block : Type := nat.
 Definition offset : Type := nat.
+Inductive borrow_state : Type :=
+  | Owner (* variable own the value it points to *)
+  | Borrowed (* other variable has borrowed your value *)
+  | BorrowerMut (* you have borrowed the value of someone else as mutable *)
+  | BorrowerImmut (* you have borrowed the value of someone else as immutable *).
+
 Inductive variable_state : Type :=
   | Wait
-  | Block (b : block).
-Inductive refinement_variable : Type :=
-  | Owner
-  | Borrower.
+  | Block (b : block) (bor_state : borrow_state).
 
 Inductive execution_order : Type :=
   | VariableOutOfScope (v : variable)
@@ -35,16 +38,15 @@ Definition symbol_table : Type := list (variable * variable_state).
 Definition execution_stack : Type := list (symbol_table * execution_order).
 Definition execution_state : Type := (memory * execution_stack).
 
-Definition execution_order_to_string (exe_order : execution_order)
-  : string :=
+(****************
+ Pretty Printing
+ ****************)
+
+Definition execution_order_to_string (exe_order : execution_order) : string :=
   match exe_order with
   | VariableOutOfScope x => "Variable Out of Scope" ++ x
   | Expression e => expression_to_string e
   end.
-
-(****************
- Pretty Printing
- ****************)
 
 Definition semaphore_to_string (s : semaphore) : string :=
   match s with
@@ -52,10 +54,20 @@ Definition semaphore_to_string (s : semaphore) : string :=
   | Writing => "W"
   | Reading n => "R" ++ nat_to_string n
   end.
-Definition variable_state_to_string (st : variable_state) : string :=
-  match st with
+
+Definition borrow_state_to_string (borrow_st : borrow_state) : string :=
+  match borrow_st with
+  | Owner => "Owner"
+  | Borrowed => "Borrowed"
+  | BorrowerMut => "BorrowerMut"
+  | BorrowerImmut => "BorrowerImmut"
+  end.
+
+Definition variable_state_to_string (var_st : variable_state) : string :=
+  match var_st with
   | Wait => "Wait"
-  | Block b => "B:" ++ nat_to_string b
+  | Block b borrow_st => "B:" ++ nat_to_string b ++ "|" ++
+      borrow_state_to_string borrow_st
   end.
 
 Fixpoint symbol_table_to_string_helper (env : symbol_table) : string :=
@@ -117,38 +129,38 @@ Definition execution_state_to_string (exe_state : execution_state) : string :=
   "execution stack:" ++ nl ++
   (execution_stack_to_string exe_stack).
 
-Fixpoint wait_env (b : block) (env : symbol_table)
+Fixpoint wait_env (b : block) (borrow_st : borrow_state) (env : symbol_table)
   : result (symbol_table * bool) :=
   match env with
   | [] => Ok ([], false)
-  | (x, st)::env =>
-      match st with
+  | (x, var_st)::env =>
+      match var_st with
       | Wait =>
-          Ok ((x, Block b)::env, true)
-      | Block b =>
-          let+ (env, done) = wait_env b env;
-          Ok ((x, st)::env, done)
+          Ok ((x, Block b borrow_st)::env, true)
+      | Block _ _ =>
+          let+ (env, done) = wait_env b borrow_st env;
+          Ok ((x, var_st)::env, done)
       end
   end.
 
-Fixpoint replace_n_next_wait (n : nat) (b : block)
+Fixpoint replace_n_next_wait (n : nat) (b : block) (borrow_st : borrow_state)
   (exe_stack : execution_stack) : result execution_stack :=
   match (n, exe_stack) with
   | (0, _) => Ok exe_stack
   | (S n, []) => Error ("No Enough Wait to Change")
   | (S n, (env, e) :: exe_stack) =>
-    let+ (env, done) = wait_env b env;
+    let+ (env, done) = wait_env b borrow_st env;
     if done then
-      let+ exe_stack = replace_n_next_wait n b exe_stack;
+      let+ exe_stack = replace_n_next_wait n b borrow_st exe_stack;
       Ok ((env, e) :: exe_stack)
     else
-      let+ exe_stack = replace_n_next_wait (S n) b exe_stack;
+      let+ exe_stack = replace_n_next_wait (S n) b borrow_st exe_stack;
       Ok ((env, e) :: exe_stack)
   end.
 
-Definition replace_2_next_wait (b : block) (exe_stack : execution_stack)
-  : result execution_stack :=
-  replace_n_next_wait 2 b exe_stack.
+Definition replace_2_next_wait (b : block) (borrow_st : borrow_state)
+  (exe_stack : execution_stack) : result execution_stack :=
+  replace_n_next_wait 2 b borrow_st exe_stack.
 
 Fixpoint get_block (x : variable) (env : symbol_table)
   : result block :=
@@ -158,7 +170,7 @@ Fixpoint get_block (x : variable) (env : symbol_table)
   | (y, st)::env' =>
       match st with
       | Wait => get_block x env'
-      | Block b => if String.eqb x y then Ok b else get_block x env'
+      | Block b borrow_st => if String.eqb x y then Ok b else get_block x env'
       end
   end.
 
@@ -192,6 +204,15 @@ Fixpoint get_list_value (off : offset) (l : list value) : result value :=
   | S n, h::q => get_list_value n q
   end.
 
+Fixpoint get_semaphore (b : block) (off : offset) (mem : memory)
+  : result semaphore :=
+  match mem with
+  | [] => Error ("Nothing Found in Memory at position" ++ 
+      value_to_string (Ptr b off))
+  | ((b0, sema), l)::mem => if Nat.eqb b b0 then Ok sema
+    else get_semaphore b off mem
+  end.
+
 Fixpoint get_value (b : block) (off : offset) (mem : memory) : result value :=
   match mem with
   | [] => Error ("Nothing Found in Memory at position" ++ 
@@ -212,7 +233,20 @@ Fixpoint change_list_value (off : offset) (v : value) (l : list value)
       Ok (h::new_list)
   end.
 
-Fixpoint change_memory (b  : block) (off : offset) (v : value) (m : memory)
+
+Fixpoint change_semaphore_memory (b  : block) (off : offset) (sema : semaphore)
+  (m : memory) : result memory :=
+  match m with
+  | [] => Error "Memory is empty : cannot change"
+  | ((b0, s), l)::m0 =>
+    if Nat.eqb b b0 then
+      Ok (((b0,sema), l)::m0)
+    else
+      let+ new_memory = change_semaphore_memory b off sema m0;
+      Ok (((b0, s), l)::new_memory)
+  end.
+
+Fixpoint change_value_memory (b  : block) (off : offset) (v : value) (m : memory)
   : result memory :=
   match m with
   | [] => Error "Memory is empty : cannot change"
@@ -222,7 +256,7 @@ Fixpoint change_memory (b  : block) (off : offset) (v : value) (m : memory)
         error "Error changing the block " ++ nat_to_string b ++ "";
       Ok (((b0,s), l)::m0)
     else
-      let+ new_memory = change_memory b off v m0;
+      let+ new_memory = change_value_memory b off v m0;
       Ok (((b0, s), l)::new_memory)
   end.
 
@@ -328,15 +362,14 @@ Fixpoint semantics_expression_exec (step : nat) (p : program)
             semantics_expression_exec n p
               (mem, (env, Expression (Value Poison))::exe_stack)
           | Ptr b off =>
-            let+ mem = change_memory b off Poison mem;
-            (* TODO DROP MORE *)
+            let+ mem = change_value_memory b off Poison mem;
+            (* TODO DROP MORE RECURSIVELY *)
             semantics_expression_exec n p
               (mem, (env, Expression (Value Poison))::exe_stack)
           end
         | _ => Error (debug_print mem env e ++ "Drop only take one argument")
         end
       | _ =>
-        (* Test if the function is drop *)
           let++ (args, e) = get_function_args_expression f p
             error (debug_print mem env e);
           let+ let_chain = args_definition_function_call args l_v;
@@ -356,7 +389,7 @@ Fixpoint semantics_expression_exec (step : nat) (p : program)
 
       match v_x with
       | Ptr b off =>
-        let+ mem = change_memory b off v_y mem;
+        let+ mem = change_value_memory b off v_y mem;
         semantics_expression_exec n p
           (mem, (env, Expression (Value Poison))::exe_stack)
       | _ => Error (debug_print mem env e ++ nl ++ "In Deref Assign" ++ nl
@@ -373,7 +406,7 @@ Fixpoint semantics_expression_exec (step : nat) (p : program)
       let++ v_y = get_value b_y 0 mem error (debug_print mem env e)
         ++ nl ++ "For" ++ y;
 
-      let+ mem = change_memory b_x 0 v_y mem;
+      let+ mem = change_value_memory b_x 0 v_y mem;
       semantics_expression_exec n p
         (mem, (env, Expression (Value Poison))::exe_stack)
 
@@ -405,9 +438,27 @@ Fixpoint semantics_expression_exec (step : nat) (p : program)
           Ok (mem, [(env, Expression (Value v))])
         else
           let (mem, b) := allocate [v] mem in
-          let++ exe_stack = replace_2_next_wait b exe_stack
-            error (debug_print mem env e);
-          semantics_expression_exec n p (mem, exe_stack)
+          let+ borrow_st =
+            match v with
+            | Poison => Ok Owner
+            | Integer i => Ok Owner
+            | Ptr b_v off_v =>
+              let++ sema = get_semaphore b_v off_v mem
+                error (debug_print mem env e);
+              match sema with
+              | Dropped => Error ("Dropped value arrived on stack" ++
+                (debug_print mem env e))
+              | Writing => Ok BorrowerMut
+              | Reading i =>
+                if Nat.eqb i 0
+                  then Ok Owner
+                  else Ok BorrowerImmut
+              end
+            end;
+
+            let++ exe_stack = replace_2_next_wait b borrow_st exe_stack
+              error (debug_print mem env e);
+            semantics_expression_exec n p (mem, exe_stack)
       end
 
     | Product l_x =>
@@ -420,6 +471,20 @@ Fixpoint semantics_expression_exec (step : nat) (p : program)
       let++ b_x = get_block x env error (debug_print mem env e);
         semantics_expression_exec n p
           (mem, (env, Expression (Value (Ptr b_x 0)))::exe_stack)
+    | BorrowMut x =>
+      let++ b_x = get_block x env error (debug_print mem env e);
+      let++ sema_x = get_semaphore b_x 0 mem error (debug_print mem env e);
+        match sema_x with
+        | Dropped => Error ("BorrowMut of a dropped variable " ++ x ++ nl ++
+            (debug_print mem env e))
+        | Writing => Error ("BorrowMut of a variable already BorrowMut "
+            ++ x ++ nl ++ (debug_print mem env e))
+        | Reading 0 =>
+          semantics_expression_exec n p
+            (mem, (env, Expression (Value (Ptr b_x 0)))::exe_stack)
+        | Reading _ => Error ("BorrowMut of a variable already Borrow"
+            ++ x ++ nl ++ (debug_print mem env e))
+        end
     | Deref x =>
       let++ b_x = get_block x env error (debug_print mem env e);
       let++ v_x = get_value b_x 0 mem error (debug_print mem env e);
@@ -449,7 +514,7 @@ Fixpoint semantics_expression_exec (step : nat) (p : program)
         end
       | _, _ => Error (debug_print mem env e ++
         "Operation only on integers" ++ nl ++
-        "Not the case for " ++ x ++ " " ++ y)
+        "Not the case for '" ++ x ++ "' or '" ++ y ++ "'")
       end
     | IfEqual x y fst snd =>
       let++ b_x = get_block x env error (debug_print mem env e);
@@ -462,7 +527,7 @@ Fixpoint semantics_expression_exec (step : nat) (p : program)
           semantics_expression_exec n p (mem, (env, Expression fst)::exe_stack)
         else
           semantics_expression_exec n p (mem, (env, Expression snd)::exe_stack)
-      | _, _ => Error (debug_print mem env e ++ 
+      | _, _ => Error (debug_print mem env e ++
         "The condition of an IF condition should evaluate to 0 or 1" ++
         "Here it evaluates to " ++ value_to_string v_x)
       end
@@ -488,7 +553,7 @@ Definition executeTest (code : string) : result value :=
         Error ("Execution Success" ++ nl ++
           (debug_print mem env main_expression) ++
           "Final Value => " ++ value_to_string v)
-    (* | (_,  [(_, Expression (Value v))]) => Ok v *)
+      (* | (_,  [(_, Expression (Value v))]) => Ok v // Real line after debug *)
     | _ => Error ("Execution not finished" ++ nl ++
              "With this execution state: " ++ nl ++
                execution_state_to_string exec_state)
@@ -556,19 +621,7 @@ fn main() {
   foo(a)
 }
 fn foo(a) {
-  (a + 2)
-}
-".
-Compute executeTest "
-fn main() {
-  fib(4)
-}
-fn fib(n) {
-  if n == 0 {
-    1
-  } else {
-    (fib((n - 1)) + fib((n - 2)))
-  }
+  a + 2
 }
 ".
 Compute executeTest "
@@ -578,11 +631,23 @@ fn main() {
 fn fib(n) {
   if n == 0 {
     1
-  } else { if n == 1 {
-    1
   } else {
-    (fib((n - 1)) + fib((n - 2)) )
-  }}
+    if n == 1 {
+      1
+    } else {
+      fib(n - 1) + fib(n - 2)
+    }
+  }
+}
+".
+Compute executeTest "
+fn main() {
+  let a = {1, 2};
+  let b = &a;
+  foo(a)
+}
+fn foo(a) {
+  *a + 1
 }
 ".
 End SemanticsTest.

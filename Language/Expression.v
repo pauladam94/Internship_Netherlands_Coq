@@ -25,6 +25,7 @@ Inductive expression : Type :=
   | Product (l : list variable)
   (* | Sequence (e1 e2 : expression) *)
   | Borrow (v : variable)
+  | BorrowMut (v : variable)
   | Deref (v : variable)
   | Op (op : operation) (x y : variable)
   | IfEqual (x y: variable) (first : expression) (second : expression).
@@ -40,6 +41,7 @@ Fixpoint expression_to_string (e : expression) : string :=
   | Value v => value_to_string v
   | Product args => "{" ++ args_to_string args ++ "}"
   | Borrow x => "&" ++ x
+  | BorrowMut x => "&mut" ++ x
   | Deref x => "*" ++ x
   | Op op x y => x ++ " " ++ operation_to_string op ++ " " ++ y
   | IfEqual x y first second => "if" ++ x ++ "==" ++ y ++ "{" ++ nl ++
