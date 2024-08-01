@@ -101,18 +101,6 @@ Fixpoint memory_to_string (mem : memory) : string :=
       ++ memory_to_string q
   end.
 
-(*****************
-  Execution Stack
-******************)
-
-Fixpoint execution_stack_only_var_out_of_scope (exe_stack : execution_stack)
-  : bool :=
-  match exe_stack with
-  | [] => true
-  | (_, VariableOutOfScope x)::q => execution_stack_only_var_out_of_scope q
-  | (_, Expression e)::q => false
-  end.
-
 Fixpoint execution_stack_to_string (exe_stack : execution_stack) : string :=
   match exe_stack with
   | [] => ""
@@ -130,6 +118,18 @@ Definition execution_state_to_string (exe_state : execution_state) : string :=
   (memory_to_string mem) ++
   "execution stack:" ++ nl ++
   (execution_stack_to_string exe_stack).
+
+(*****************
+  Execution Stack
+******************)
+
+Fixpoint execution_stack_only_var_out_of_scope (exe_stack : execution_stack)
+  : bool :=
+  match exe_stack with
+  | [] => true
+  | (_, VariableOutOfScope x)::q => execution_stack_only_var_out_of_scope q
+  | (_, Expression e)::q => false
+  end.
 
 Fixpoint change_variable_state (x : variable) (borrow_st : borrow_state)
   (env : symbol_table) : result symbol_table :=
@@ -264,15 +264,15 @@ Fixpoint change_list_value (off : offset) (v : value) (l : list value)
       Ok (h::new_list)
   end.
 
-Fixpoint change_semaphore_memory (b  : block) (off : offset) (sema : semaphore)
-  (m : memory) : result memory :=
+Fixpoint change_semaphore_memory (b  : block) (sema : semaphore) (m : memory)
+  : result memory :=
   match m with
   | [] => Error "Memory is empty : cannot change"
   | ((b0, s), l)::m0 =>
     if Nat.eqb b b0 then
       Ok (((b0,sema), l)::m0)
     else
-      let+ new_memory = change_semaphore_memory b off sema m0;
+      let+ new_memory = change_semaphore_memory b sema m0;
       Ok (((b0, s), l)::new_memory)
   end.
 
@@ -464,9 +464,9 @@ Fixpoint semantics_expression_exec (step : nat) (p : program)
         error (debug_print mem env e);
       let++ v_x = get_value b_x 0 mem error (debug_print mem env e);
 
-      match exe_stack with
-      | [] => Ok (mem, [(env, Expression (Value v_x))])
-      | _ =>
+      (* match exe_stack with *)
+      (* | [] => Ok (mem, [(env, Expression (Value v_x))]) *)
+      (* | _ => *)
         (* if execution_stack_only_var_out_of_scope exe_stack then *)
         (*   let+ (mem, exe_stack) = *)
         (*     semantics_expression_exec n p (mem, exe_stack); *)
@@ -475,7 +475,7 @@ Fixpoint semantics_expression_exec (step : nat) (p : program)
           (* Todo change env so that x has been read *)
           semantics_expression_exec n p
             (mem, (env, Expression (Value v_x))::exe_stack)
-      end
+      (* end *)
 
     | Value v =>
       match exe_stack with
@@ -520,14 +520,16 @@ Fixpoint semantics_expression_exec (step : nat) (p : program)
       let++ (b_x, borrow_st_x) = get_block_borrow_st x env
         error (debug_print mem env e);
       (* Change the environment depending on borrow state of x *)
-      let++ env =
+      let++ (mem, env) =
         match borrow_st_x with
         | Owner =>
-          let+ env = change_variable_state x BorrowedImmut env; Ok env
+          let+ env = change_variable_state x BorrowedImmut env;
+          let+ mem = change_semaphore_memory b_x (Reading 1) mem;
+            Ok (mem, env)
         | BorrowerMut => Error "Cannot Borrow an Mutable Borrow"
-        | BorrowerImmut => Ok env
-        | BorrowedMut => Ok env
-        | BorrowedImmut => Ok env
+        | BorrowerImmut => Ok (mem, env)
+        | BorrowedMut => Ok (mem, env)
+        | BorrowedImmut => Ok (mem, env)
         end error (debug_print mem env e);
         let+ deref_v_x = get_value b_x 0 mem;
         (* match deref_v_x with TODO *)
@@ -672,21 +674,21 @@ Compute executeTest "fn main(){let a = 4; a = 5; let y = &a; a}". (*OK*)
 Compute executeTest "fn main(){let a = 4; let y = &a; *y = 12; a}". (*Ok*)
 Compute executeTest "fn main(){let a = 4; let y = &a; y = 32; a}". (*Ok*)
 Compute executeTest "fn main(){let a = 4; let y = &a; a = 32; *y}". (*Ok*)
-Compute executeTest "fn main(){let x = 4; let y = 5; let a = {x, y}; a}". (*Ok*)
+Compute executeTest "fn main(){let x = 10; let y = 5; let a = {x, y}; a}". (*Ok*)
 Compute executeTest "fn main(){let a = {4, 12}; 3}". (*Ok*)
 Compute executeTest "fn main(){let a = {4, 12}; a}". (*Ok*)
 Compute executeTest "fn main(){let a = 4; let b = a = 3; a}". (*Ok*)
 Compute executeTest "fn main(){let a = 4; let b = a = 3; b}". (*Ok*)
 Compute executeTest "
 fn main() {
-  let a = 4;
-  let b = (3 + a);
+  let a = foo();
+  let b = 3 + a;
   b
 }
 fn foo() {
   12
 }
-".
+". (* Ok 15 *)
 Compute executeTest "
 fn main() {
   let a = 4;
@@ -694,9 +696,9 @@ fn main() {
   foo()
 }
 fn foo() {
-  12
+  42
 }
-".
+". (* Ok 42 *)
 Compute executeTest "
 fn main() {
   let a = 4;
@@ -707,7 +709,7 @@ fn main() {
 fn foo(a) {
   a + 2
 }
-".
+". (* Ok 14 *)
 Compute executeTest "
 fn main() {
   fib(6)

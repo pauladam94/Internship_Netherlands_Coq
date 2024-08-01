@@ -4,8 +4,8 @@ Prooving Some Borrow checking Propertie in Coq
 ## How to run
 
 ```rust
-    coq_makefile -f _CoqProject *.v -o Makefile
-    make
+coq_makefile -f _CoqProject *.v -o Makefile
+make
 ```
 
 ## Dependencie chain Language
