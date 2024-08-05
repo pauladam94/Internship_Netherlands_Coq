@@ -1,8 +1,8 @@
 From Coq Require Import Strings.String.
-Require Import Rust.Language.
+Require Import Language.Language.
 Require Import Utils.Utils.
 Require Import Utils.Error.
-Require Import Rust.Expression.
+Require Import Expression.Expression.
 From Coq Require Import Lists.List. Import ListNotations.
 
 Definition function_definition : Type :=

@@ -1,6 +1,6 @@
 From Coq Require Import Strings.String.
-From Language Require Import Language.
-From Language Require Import Utils.
+Require Import Language.Language.
+Require Import Utils.Utils.
 
 (* Syntax Definition *)
 Inductive real_e : Type :=

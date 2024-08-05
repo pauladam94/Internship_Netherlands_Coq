@@ -4,13 +4,13 @@ Local Open Scope string_scope.
 Require Import Coq.Lists.List.
 Require Import Integers.
 Import ListNotations.
-From Language Require Import Utils.
-From Language Require Import Error.
-From Language Require Import Language.
-From Language Require Import Expression.
-From Language Require Import ParseExpression.
-From Language Require Import Program.
-From Language Require Import ParseProgram.
+Require Import Utils.Utils.
+Require Import Utils.Error.
+Require Import Language.Language.
+Require Import Expression.Expression.
+Require Import Parser.ParserRustProgram.
+Require Import Parser.ParserRustExpression.
+Require Import Program.Program.
 
 (* Memory Model Definition *)
 Inductive semaphore : Type :=
@@ -20,6 +20,7 @@ Inductive semaphore : Type :=
 Definition block : Type := nat.
 Definition offset : Type := nat.
 Inductive borrow_state : Type :=
+  | OwnershipPass (* variable has passed his ownership to someone else *)
   | Owner        (* variable own the value it points to *)
   | BorrowedMut  (* other variable has borrowed your value mutably *)
   | BorrowedImmut(* other variable(s) has borrowed your value immutably *)
@@ -58,9 +59,10 @@ Definition semaphore_to_string (s : semaphore) : string :=
 
 Definition borrow_state_to_string (borrow_st : borrow_state) : string :=
   match borrow_st with
+  | OwnershipPass => "OwnershipPass"
   | Owner => "Owner"
   | BorrowedMut => "BorrowedMut"
-  | BorrowedImmut => "BorrowedMut"
+  | BorrowedImmut => "BorrowedImmut"
   | BorrowerMut => "BorrowerMut"
   | BorrowerImmut => "BorrowerImmut"
   end.
@@ -235,13 +237,13 @@ Fixpoint get_list_value (off : offset) (l : list value) : result value :=
   | S n, h::q => get_list_value n q
   end.
 
-Fixpoint get_semaphore (b : block) (off : offset) (mem : memory)
+Fixpoint get_semaphore (b : block) (mem : memory)
   : result semaphore :=
   match mem with
   | [] => Error ("Nothing Found in Memory at position" ++ 
-      value_to_string (Ptr b off))
+      value_to_string (Ptr b 0))
   | ((b0, sema), l)::mem => if Nat.eqb b b0 then Ok sema
-    else get_semaphore b off mem
+    else get_semaphore b mem
   end.
 
 Fixpoint get_value (b : block) (off : offset) (mem : memory) : result value :=
@@ -379,6 +381,8 @@ Fixpoint semantics_expression_exec (step : nat) (p : program)
     | FunctionCall f l_v =>
       match f with
       | "drop" =>
+          Error "todo drop"
+      | "free" =>
         match l_v with
         | [x] =>
           let++ (b_x, _) = get_block_borrow_st x env 
@@ -392,22 +396,23 @@ Fixpoint semantics_expression_exec (step : nat) (p : program)
               (mem, (env, Expression (Value Poison))::exe_stack)
           | Ptr b off =>
             let+ mem = change_value_memory b off Poison mem;
-            (* TODO DROP MORE RECURSIVELY *)
+              (* TODO drop all Ptr(b, [0...]) *)
             semantics_expression_exec n p
               (mem, (env, Expression (Value Poison))::exe_stack)
           end
         | _ => Error (debug_print mem env e ++ "Drop only take one argument")
         end
       | "malloc" =>
+        (* TODO allocate some memory for the C part *)
         match l_v with
         | [x] =>
           let++ (b_x, _) = get_block_borrow_st x env 
             error (debug_print mem env e);
           let++ v_x = get_value b_x 0 mem error (debug_print mem env e);
           match v_x with
-          | Poison => Error "todo malloc"
-          | Integer i => Error "todo malloc"
-          | Ptr b off => Error "todo malloc"
+          | Poison => Error "malloc takes only integer here got Poison"
+          | Integer i => Error "todo malloc with an integer"
+          | Ptr b off => Error "malloc only takes integer here got pointer"
           end
         | _ => Error (debug_print mem env e ++ "malloc take one argument")
         end
@@ -445,6 +450,8 @@ Fixpoint semantics_expression_exec (step : nat) (p : program)
       end
 
     | Assign x y =>
+        (* TODO check if x is owned or borrowed mutably *)
+        (* TODO check if y is owned *)
       let++ (b_x, borrow_st_x) = get_block_borrow_st x env
         error (debug_print mem env e);
 
@@ -453,7 +460,7 @@ Fixpoint semantics_expression_exec (step : nat) (p : program)
         error (debug_print mem env e);
 
       let++ v_y = get_value b_y 0 mem error (debug_print mem env e)
-        ++ nl ++ "For" ++ y;
+        ++ nl ++ "For " ++ y;
 
       let+ mem = change_value_memory b_x 0 v_y mem;
       semantics_expression_exec n p
@@ -462,20 +469,21 @@ Fixpoint semantics_expression_exec (step : nat) (p : program)
     | Var x =>
       let++ (b_x, borrow_st_x) = get_block_borrow_st x env
         error (debug_print mem env e);
-      let++ v_x = get_value b_x 0 mem error (debug_print mem env e);
-
-      (* match exe_stack with *)
-      (* | [] => Ok (mem, [(env, Expression (Value v_x))]) *)
-      (* | _ => *)
-        (* if execution_stack_only_var_out_of_scope exe_stack then *)
-        (*   let+ (mem, exe_stack) = *)
-        (*     semantics_expression_exec n p (mem, exe_stack); *)
-        (*   Ok (mem, [(env, Expression (Value v_x))]) *)
-        (* else *)
-          (* Todo change env so that x has been read *)
-          semantics_expression_exec n p
-            (mem, (env, Expression (Value v_x))::exe_stack)
-      (* end *)
+      let++ v_x = get_value b_x 0 mem error debug_print mem env e;
+      let++ sema_x = get_semaphore b_x mem error debug_print mem env e;
+      let++ mem =
+        match sema_x with
+        | Dropped => Error ("Variable '" ++ x ++
+          "' passed ownership or has been dropped")
+        | Writing => Error ("Variable '" ++ x ++
+            "' mut borrowed by someone else")
+        | Reading 0 =>
+          change_semaphore_memory b_x Dropped mem
+        | Reading _ => Error ("Variable '" ++ x ++
+          "' immut borrowed by someone else")
+        end error debug_print mem env e;
+      semantics_expression_exec n p
+        (mem, (env, Expression (Value v_x))::exe_stack)
 
     | Value v =>
       match exe_stack with
@@ -492,7 +500,7 @@ Fixpoint semantics_expression_exec (step : nat) (p : program)
             | Poison => Ok Owner
             | Integer i => Ok Owner
             | Ptr b_v off_v =>
-              let++ sema = get_semaphore b_v off_v mem
+              let++ sema = get_semaphore b_v mem
                 error (debug_print mem env e);
               match sema with
               | Dropped => Error ("Dropped value arrived on stack" ++
@@ -511,6 +519,7 @@ Fixpoint semantics_expression_exec (step : nat) (p : program)
       end
 
     | Product l_x =>
+        (* TODO all variables should pass to OwnershipPass borrow state *)
       let+ l_v = variable_list_to_value_list l_x mem env;
       let (mem, b) := allocate l_v mem in
       semantics_expression_exec n p
@@ -519,52 +528,36 @@ Fixpoint semantics_expression_exec (step : nat) (p : program)
     | Borrow x =>
       let++ (b_x, borrow_st_x) = get_block_borrow_st x env
         error (debug_print mem env e);
-      (* Change the environment depending on borrow state of x *)
-      let++ (mem, env) =
-        match borrow_st_x with
-        | Owner =>
-          let+ env = change_variable_state x BorrowedImmut env;
-          let+ mem = change_semaphore_memory b_x (Reading 1) mem;
-            Ok (mem, env)
-        | BorrowerMut => Error "Cannot Borrow an Mutable Borrow"
-        | BorrowerImmut => Ok (mem, env)
-        | BorrowedMut => Ok (mem, env)
-        | BorrowedImmut => Ok (mem, env)
-        end error (debug_print mem env e);
-        let+ deref_v_x = get_value b_x 0 mem;
-        (* match deref_v_x with TODO *)
-        (* | Poison => Error"" *)
-        (* | Integer i => Error "" *)
-        (* | Ptr b off => Error "" *)
-        (* end *)
-      (* let++ sema_x = get_semaphore b_x 0 mem error (debug_print mem env e); *)
-      (*   match sema_x with *)
-      (*   | Dropped => Error ("Borrow of a dropped variable " ++ x ++ nl ++ *)
-      (*       (debug_print mem env e)) *)
-      (*   | Writing => Error ("Borrow of a variable already BorrowMut " *)
-      (*       ++ x ++ nl ++ (debug_print mem env e)) *)
-      (*   | Reading i => *)
-          (* Increment borrowing for variable x *)
-          (* changer à adress b_x 0 le borrowing *)
-          semantics_expression_exec n p
-            (mem, (env, Expression (Value (Ptr b_x 0)))::exe_stack)
-        (* end *)
+        let++ sema_x = get_semaphore b_x mem error debug_print mem env e;
+        let++ mem =
+        match sema_x with
+        | Dropped => Error ("Immut Borrow of dropped variable " ++ x ++ nl ++
+            (debug_print mem env e))
+        | Writing => Error ("Immut Borrow of a variable already BorrowMut "
+            ++ x ++ nl ++ (debug_print mem env e))
+        | Reading i =>
+            change_semaphore_memory b_x (Reading (i + 1)) mem
+        end error debug_print mem env e;
+        semantics_expression_exec n p
+          (mem, (env, Expression (Value (Ptr b_x 0)))::exe_stack)
 
     | BorrowMut x =>
       let++ (b_x, borrow_st_x) = get_block_borrow_st x env
         error (debug_print mem env e);
-      let++ sema_x = get_semaphore b_x 0 mem error (debug_print mem env e);
-        match sema_x with
+      let++ sema_x = get_semaphore b_x mem error (debug_print mem env e);
+      let++ mem = match sema_x with
         | Dropped => Error ("BorrowMut of a dropped variable " ++ x ++ nl ++
             (debug_print mem env e))
         | Writing => Error ("BorrowMut of a variable already BorrowMut "
             ++ x ++ nl ++ (debug_print mem env e))
         | Reading 0 =>
-          semantics_expression_exec n p
-            (mem, (env, Expression (Value (Ptr b_x 0)))::exe_stack)
+          change_semaphore_memory b_x Writing mem
         | Reading _ => Error ("BorrowMut of a variable already Borrow"
             ++ x ++ nl ++ (debug_print mem env e))
-        end
+        end error debug_print mem env e;
+        semantics_expression_exec n p
+          (mem, (env, Expression (Value (Ptr b_x 0)))::exe_stack)
+
     | Deref x =>
       let++ (b_x, borrow_st_x) = get_block_borrow_st x env
         error (debug_print mem env e);
@@ -648,7 +641,7 @@ Definition executeTest (code : string) : result value :=
   end.
 
 Module SemanticsTest.
-Compute executeTest "fn main() { }". (*Ok*)
+Compute executeTest "fn main() {}". (* Ok Error parsing *)
 Compute executeTest "fn main(){4}". (*Ok*)
 Compute executeTest "fn main(){{3, 2}}". (*Ok*)
 Compute executeTest "fn main(){x = 3}". (* Normal Error *)
@@ -669,10 +662,10 @@ Compute executeTest
   "fn main(){let a = 4; a = 12; let y = a; *y}". (* Normal Error *)
 Compute executeTest
   "fn main(){let a = 4; a = 12; let y = a; y = 32; y = 42; y}". (*Ok*)
-Compute executeTest "fn main(){let a = 4; let y = &a; a}". (*Ok*)
-Compute executeTest "fn main(){let a = 4; a = 5; let y = &a; a}". (*OK*)
-Compute executeTest "fn main(){let a = 4; let y = &a; *y = 12; a}". (*Ok*)
-Compute executeTest "fn main(){let a = 4; let y = &a; y = 32; a}". (*Ok*)
+Compute executeTest "fn main(){let a = 4; let y = &a; a}". (*Error*)
+Compute executeTest "fn main(){let a = 4; a = 5; let y = &a; *y}". (*OK*)
+Compute executeTest "fn main(){let a = 4; let y = &a; *y = 12; y}". (*Ok*)
+Compute executeTest "fn main(){let a = 4; let y = &a; y = 32; a}". (*Error*)
 Compute executeTest "fn main(){let a = 4; let y = &a; a = 32; *y}". (*Ok*)
 Compute executeTest "fn main(){let x = 10; let y = 5; let a = {x, y}; a}". (*Ok*)
 Compute executeTest "fn main(){let a = {4, 12}; 3}". (*Ok*)
@@ -735,6 +728,25 @@ fn main() {
 fn foo(a) {
   *a + 1
 }
+". (* Error a immut borrowed *)
+Compute executeTest "
+fn main() {
+  let a = {1, 2};
+  let b = a;
+  foo(a)
+}
+fn foo(a) {
+  *a + 1
+}
+". (* Error a been dropped *)
+Compute executeTest "
+fn main() {
+  let a = {1, 2};
+  foo(&a)
+}
+fn foo(a) {
+  *a + 1
+}
 ".
 End SemanticsTest.
 
@@ -750,3 +762,4 @@ Inductive semantics_expression : execution_state -> execution_state -> Prop :=
 Module SemanticsRelationTest.
 (* Example example50 : forall (x : variable) (tau : type), *)
   (* (type_expression [(x, (None, tau))] x tau). *)
+End SemanticsRelationTest.

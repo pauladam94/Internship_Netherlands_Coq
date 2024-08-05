@@ -1,15 +1,27 @@
--Q Rust Rust
--Q C C
+-Q Expression Expression
+-Q Language Language
+-Q Lexer Lexer
+-Q Parser Parser
+-Q Program Program
+-Q Semantics Semantics
+-Q Typing Typing
 -Q Utils Utils
 -docroot .
 
 Utils/Error.v
 Utils/Utils.v
 
-Rust/Expression.v
-Rust/Language.v
-Rust/ParseExpression.v
-Rust/ParseProgram.v
-Rust/Program.v
-Rust/Semantics.v
-Rust/Typing.v
+Expression/Expression.v
+
+Language/Language.v
+
+Lexer/Lexer.v
+
+Program/Program.v
+
+Parser/ParserRustExpression.v
+Parser/ParserRustProgram.v
+
+Semantics/Semantics.v
+
+Typing/Typing.v

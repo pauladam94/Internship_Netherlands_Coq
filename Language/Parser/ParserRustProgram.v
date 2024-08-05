@@ -4,11 +4,12 @@ From Coq Require Import Init.Nat.
 From Coq Require Import Lists.List. Import ListNotations.
 
 Require Import Utils.Utils.
+Require Import Lexer.Lexer.
 Require Import Utils.Error.
-Require Import Rust.Language.
-Require Import Rust.Expression.
-Require Import Rust.ParseExpression.
-Require Import Rust.Program.
+Require Import Language.Language.
+Require Import Expression.Expression.
+Require Import Parser.ParserRustExpression.
+Require Import Program.Program.
 
 Definition parse_function_definition (steps : nat) (rest : list token)
   : result (function_definition * list token) :=
