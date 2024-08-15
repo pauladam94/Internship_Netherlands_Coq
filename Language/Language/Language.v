@@ -35,6 +35,7 @@ Definition type_eqb (tau1 tau2 : type) : bool :=
 
 (* Value Definition *)
 Inductive value : Type :=
+  | NullPtr
   | Poison
   | Integer (i : nat)
   | Ptr (b : block) (off : offset).
@@ -42,6 +43,7 @@ Inductive value : Type :=
 (* Type of each value *)
 Definition value_to_type (v : value) : type :=
   match v with
+  | NullPtr => ProductT
   | Poison => PoisonT
   | Integer _ => IntT
   | Ptr b off => ProductT
@@ -61,6 +63,7 @@ Definition typingEnv : Type := list (variable * refined_type).
 (* Pretty Printing *)
 Definition value_to_string (v : value) : string :=
   match v with
+  | NullPtr => "ptr(null)"
   | Poison => "Poison"
   | Integer i => nat_to_string i
   | Ptr b off => "ptr(" ++ nat_to_string b ++ ", " ++ nat_to_string off ++ ")"
@@ -71,4 +74,14 @@ Fixpoint args_to_string (args : list variable) : string :=
   | [] => ""
   | [h] => h
   | h::q => h ++ ", " ++ args_to_string q
+  end.
+
+Inductive lang_flag : Type :=
+  | Rust
+  | C.
+
+Definition lang_flag_to_string (lang : lang_flag) : string :=
+  match lang with
+  | Rust => "Rust"
+  | C => "C"
   end.

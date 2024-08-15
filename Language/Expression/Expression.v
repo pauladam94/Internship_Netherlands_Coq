@@ -41,7 +41,7 @@ Fixpoint expression_to_string (e : expression) : string :=
   | Value v => value_to_string v
   | Product args => "{" ++ args_to_string args ++ "}"
   | Borrow x => "&" ++ x
-  | BorrowMut x => "&mut" ++ x
+  | BorrowMut x => "&mut " ++ x
   | Deref x => "*" ++ x
   | Op op x y => x ++ " " ++ operation_to_string op ++ " " ++ y
   | IfEqual x y first second => "if" ++ x ++ "==" ++ y ++ "{" ++ nl ++

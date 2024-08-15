@@ -8,31 +8,6 @@ Require Import Utils.Error.
 Require Import Language.Language.
 Require Import Expression.Expression.
 
-(* TODO put this in Error.v *)
-
-(* Definition parser (T : Type) := *)
-(*   list token -> result (T * list token). *)
-
-Fixpoint many_helper {T}
-  (p : list token -> result (T * list token)) (acc : list T)
-  (steps : nat) (xs : list token)
-  : result (list T * list token) :=
-  match steps, p xs with
-  | 0, _ =>
-      Error "Too many recursive calls"
-  | _, Error _ =>
-      Ok ((rev acc), xs)
-  | S n, Ok (t, xs') =>
-      many_helper p (t :: acc) n xs'
-  end.
-
-(** A (step-indexed) parser that expects zero or more [p]s: *)
-
-Definition many {T}
-  (p : list token -> result (T * list token))
-  (steps : nat) : list token -> result (list T * list token) :=
-  many_helper p [] steps.
-
 (** A parser that expects a given token, followed by [p]: *)
 Definition firstExpect {T}
   (t : token)
@@ -334,6 +309,7 @@ Compute parse "{{x, y}; , z} ".
 Compute parse "if {1, 2} == 4 {3} else {4}".
 Compute parse "if x == 2 {3} else {4}".
 Compute parse "let a = 4; if a == 1 {4} else {a = 12}".
+Compute parse "let a = 4; *a = *b + *b;".
 
 Compute expression_to_string
 (Let "x"%string (Value (Integer 4))

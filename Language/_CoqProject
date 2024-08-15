@@ -19,9 +19,10 @@ Lexer/Lexer.v
 
 Program/Program.v
 
-Parser/ParserRustExpression.v
+Parser/ParserExpression.v
 Parser/ParserRustProgram.v
 
+Semantics/SemanticsType.v
 Semantics/Semantics.v
 
 Typing/Typing.v
